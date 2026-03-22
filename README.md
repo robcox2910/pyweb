@@ -69,6 +69,22 @@ Every concept is explained with real-world analogies:
 | Templates | [templates.md](docs/concepts/templates.md) | Form letters with blanks |
 | Server | [server.md](docs/concepts/server.md) | The post office |
 
+## Related Projects
+
+PyWeb is part of an educational series where every layer of the
+computing stack is built from scratch:
+
+| Project | What It Teaches |
+|---------|----------------|
+| [PyOS](https://github.com/robcox2910/py-os) | Operating systems |
+| [Pebble](https://github.com/robcox2910/pebble-lang) | Compilers and programming languages |
+| [PyDB](https://github.com/robcox2910/pydb) | Relational databases |
+| [PyStack](https://github.com/robcox2910/pystack) | Full-stack integration |
+| [PyGit](https://github.com/robcox2910/pygit) | Version control |
+
+All projects use TDD, comprehensive documentation with real-world
+analogies, and are designed for learners aged 12+.
+
 ## License
 
 MIT

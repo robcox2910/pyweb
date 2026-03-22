@@ -24,6 +24,8 @@ dependencies = []
 [project.urls]
 Homepage = "https://github.com/robcox2910/pyweb"
 Repository = "https://github.com/robcox2910/pyweb"
+Issues = "https://github.com/robcox2910/pyweb/issues"
+Documentation = "https://robcox2910.github.io/pyweb/"
 
 [project.scripts]
 pyweb = "pyweb.cli:main"
