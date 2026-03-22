@@ -12,7 +12,7 @@ trying to deliver a package through the letter slot), it gets a
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from pyweb.request import Request
 from pyweb.response import Response, method_not_allowed, not_found
@@ -98,41 +98,43 @@ class Router:
             route.pattern, route.param_names = _compile_path(path)
         self._routes.append(route)
 
-    def get(self, path: str) -> Callable[[Handler], Handler]:
-        """Register a GET route via decorator."""
+    def _route_decorator(self, method: str, path: str) -> Callable[[Handler], Handler]:
+        """Create a decorator that registers a route for *method* and *path*.
+
+        This is a shared helper -- like a stamp machine in the mailroom.
+        Instead of hand-writing the same label for GET, POST, PUT, etc.,
+        we set the machine once and stamp as many letters as we need.
+
+        Args:
+            method: The HTTP method (GET, POST, etc.).
+            path: The URL path pattern.
+
+        Returns:
+            A decorator that registers the handler and returns it unchanged.
+
+        """
 
         def decorator(handler: Handler) -> Handler:
-            self.add_route("GET", path, handler)
+            self.add_route(method, path, handler)
             return handler
 
         return decorator
+
+    def get(self, path: str) -> Callable[[Handler], Handler]:
+        """Register a GET route via decorator."""
+        return self._route_decorator("GET", path)
 
     def post(self, path: str) -> Callable[[Handler], Handler]:
         """Register a POST route via decorator."""
-
-        def decorator(handler: Handler) -> Handler:
-            self.add_route("POST", path, handler)
-            return handler
-
-        return decorator
+        return self._route_decorator("POST", path)
 
     def put(self, path: str) -> Callable[[Handler], Handler]:
         """Register a PUT route via decorator."""
-
-        def decorator(handler: Handler) -> Handler:
-            self.add_route("PUT", path, handler)
-            return handler
-
-        return decorator
+        return self._route_decorator("PUT", path)
 
     def delete(self, path: str) -> Callable[[Handler], Handler]:
         """Register a DELETE route via decorator."""
-
-        def decorator(handler: Handler) -> Handler:
-            self.add_route("DELETE", path, handler)
-            return handler
-
-        return decorator
+        return self._route_decorator("DELETE", path)
 
     def dispatch(self, request: Request) -> Response:
         """Find and call the handler for a request.
@@ -157,14 +159,7 @@ class Router:
                     if route.method == request.method:
                         params = dict(zip(route.param_names, match.groups(), strict=True))
                         # Create a new request with the matched params.
-                        req_with_params = Request(
-                            method=request.method,
-                            path=request.path,
-                            headers=request.headers,
-                            body=request.body,
-                            query_params=request.query_params,
-                            params=params,
-                        )
+                        req_with_params = replace(request, params=params)
                         return route.handler(req_with_params)
                     allowed_methods.append(route.method)
                 continue
