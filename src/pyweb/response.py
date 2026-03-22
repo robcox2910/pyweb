@@ -2,15 +2,21 @@
 
 A response is the server's reply to a request. It includes a status
 code (did it work?), headers (info about the reply), and a body
-(the actual content).
+(the actual content). Think of it as the letter you write back after
+reading someone's request.
 """
 
+import json
 from dataclasses import dataclass, field
 from enum import IntEnum
 
 
 class StatusCode(IntEnum):
-    """Common HTTP status codes."""
+    """Common HTTP status codes.
+
+    Each code tells the browser what happened -- like a one-word
+    summary stamped on the reply envelope.
+    """
 
     OK = 200
     CREATED = 201
@@ -64,6 +70,8 @@ class Response:
     def to_bytes(self) -> bytes:
         """Serialize the response to raw HTTP bytes.
 
+        Does NOT mutate the Response -- computes Content-Length locally.
+
         Returns:
             The complete HTTP response as bytes.
 
@@ -71,11 +79,10 @@ class Response:
         phrase = STATUS_PHRASES.get(self.status, "Unknown")
         status_line = f"HTTP/1.1 {self.status} {phrase}"
 
-        # Auto-set Content-Length.
         body_bytes = self.body.encode("utf-8")
-        self.headers["Content-Length"] = str(len(body_bytes))
-
-        header_lines = [f"{k}: {v}" for k, v in self.headers.items()]
+        # Build headers with auto Content-Length (without mutating self).
+        all_headers = {**self.headers, "Content-Length": str(len(body_bytes))}
+        header_lines = [f"{k}: {v}" for k, v in all_headers.items()]
         head = "\r\n".join([status_line, *header_lines])
         return head.encode("utf-8") + b"\r\n\r\n" + body_bytes
 
@@ -87,27 +94,27 @@ def html_response(body: str, status: int = StatusCode.OK) -> Response:
         body: The HTML content.
         status: The HTTP status code.
 
-    Returns:
-        A Response with Content-Type set to text/html.
-
     """
     resp = Response(status=status, body=body)
     resp.set_content_type("text/html; charset=utf-8")
     return resp
 
 
-def json_response(body: str, status: int = StatusCode.OK) -> Response:
+def json_response(
+    body: dict[str, object] | list[object] | str,
+    status: int = StatusCode.OK,
+) -> Response:
     """Create a JSON response.
 
+    Accepts a dict, list, or pre-serialized string.
+
     Args:
-        body: The JSON string.
+        body: The JSON data (dict/list will be serialized automatically).
         status: The HTTP status code.
 
-    Returns:
-        A Response with Content-Type set to application/json.
-
     """
-    resp = Response(status=status, body=body)
+    json_str = body if isinstance(body, str) else json.dumps(body)
+    resp = Response(status=status, body=json_str)
     resp.set_content_type("application/json")
     return resp
 
@@ -119,15 +126,41 @@ def text_response(body: str, status: int = StatusCode.OK) -> Response:
         body: The text content.
         status: The HTTP status code.
 
-    Returns:
-        A Response with Content-Type set to text/plain.
-
     """
     resp = Response(status=status, body=body)
     resp.set_content_type("text/plain")
     return resp
 
 
+def redirect(url: str, *, permanent: bool = False) -> Response:
+    """Create a redirect response.
+
+    Args:
+        url: The URL to redirect to.
+        permanent: If True, use 301 (permanent). Otherwise 302 (temporary).
+
+    """
+    status = StatusCode.MOVED if permanent else StatusCode.FOUND
+    resp = Response(status=status)
+    resp.headers["Location"] = url
+    return resp
+
+
 def not_found(message: str = "Not Found") -> Response:
     """Create a 404 Not Found response."""
     return html_response(f"<h1>404</h1><p>{message}</p>", status=StatusCode.NOT_FOUND)
+
+
+def method_not_allowed(allowed: list[str]) -> Response:
+    """Create a 405 Method Not Allowed response.
+
+    Args:
+        allowed: List of methods that ARE allowed for this path.
+
+    """
+    resp = html_response(
+        f"<h1>405 Method Not Allowed</h1><p>Try: {', '.join(allowed)}</p>",
+        status=StatusCode.METHOD_NOT_ALLOWED,
+    )
+    resp.headers["Allow"] = ", ".join(allowed)
+    return resp

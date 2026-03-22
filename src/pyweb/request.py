@@ -3,9 +3,23 @@
 An HTTP request is like a letter arriving at the post office. It has
 an address (the path), a purpose (the method), and extra notes
 (headers). This module parses raw HTTP text into a structured object.
+
+How HTTP requests look:
+
+    GET /about?page=2 HTTP/1.1
+    Host: example.com
+    Accept: text/html
+
+    (body goes here for POST requests)
+
+The parser splits this into method, path, headers, query parameters,
+and body -- everything a handler needs to build a response.
 """
 
+import json
 from dataclasses import dataclass, field
+from typing import cast
+from urllib.parse import unquote_plus
 
 from pyweb.errors import ParseError
 
@@ -23,6 +37,7 @@ class Request:
         headers: Header name-value pairs.
         body: The request body (empty for GET requests).
         query_params: Parsed query string parameters.
+        params: Path parameters from dynamic routes (e.g., {"id": "42"}).
 
     """
 
@@ -31,6 +46,23 @@ class Request:
     headers: dict[str, str] = field(default_factory=lambda: {})
     body: str = ""
     query_params: dict[str, str] = field(default_factory=lambda: {})
+    params: dict[str, str] = field(default_factory=lambda: {})
+
+    def json(self) -> dict[str, object]:
+        """Parse the request body as JSON.
+
+        Returns:
+            The parsed JSON as a dictionary.
+
+        Raises:
+            ValueError: If the body is not valid JSON.
+
+        """
+        raw = json.loads(self.body)
+        if not isinstance(raw, dict):
+            msg = "JSON body must be an object"
+            raise TypeError(msg)
+        return cast(dict[str, object], raw)
 
 
 def parse_request(raw: str) -> Request:
@@ -50,19 +82,18 @@ def parse_request(raw: str) -> Request:
         msg = "Empty request"
         raise ParseError(msg)
 
+    # Normalize line endings to \n for consistent parsing.
+    normalized = raw.replace("\r\n", "\n")
+
     # Split headers from body (separated by blank line).
-    parts = raw.split("\r\n\r\n", maxsplit=1)
+    parts = normalized.split("\n\n", maxsplit=1)
     header_section = parts[0]
     body = parts[1] if len(parts) > 1 else ""
 
-    lines = header_section.split("\r\n")
+    lines = header_section.split("\n")
     if not lines:
         msg = "Missing request line"
         raise ParseError(msg)
-
-    # Also handle \n-only line endings (common in testing).
-    if len(lines) == 1:
-        lines = header_section.split("\n")
 
     # Parse the request line: "GET /path HTTP/1.1"
     request_line = lines[0]
@@ -87,7 +118,10 @@ def parse_request(raw: str) -> Request:
         for pair in query_string.split("&"):
             if "=" in pair:
                 key, value = pair.split("=", maxsplit=1)
-                query_params[key] = value
+                query_params[unquote_plus(key)] = unquote_plus(value)
+            elif pair:
+                # Bare parameter like ?debug
+                query_params[unquote_plus(pair)] = ""
 
     # Parse headers.
     headers: dict[str, str] = {}

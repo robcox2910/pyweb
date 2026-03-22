@@ -2,50 +2,72 @@
 
 An educational HTTP web server built from scratch in Python.
 
-PyWeb is a fully functional web server that handles HTTP requests,
-routes URLs to handlers, renders templates, and serves responses --
-all written from the ground up as a learning project.
+Every time you visit a website, your browser sends a letter to a server
+and gets a reply. PyWeb is that server -- built from scratch so you can
+see exactly how it works. Think of it as a post office: letters arrive,
+get sorted, and replies are sent back.
+
+## Features
+
+- **HTTP request parsing** -- read the incoming letter (method, path, headers, body, query params)
+- **Response building** -- write the reply (status codes, headers, body)
+- **URL routing** -- the mailroom that sorts letters to the right handler
+- **Path parameters** -- dynamic URLs like `/users/<id>`
+- **Template engine** -- form letters with `{{ blanks }}` to fill in
+- **Static files** -- serve CSS, JS, images straight from a folder
+- **JSON support** -- parse JSON request bodies, return JSON responses
+- **Logging** -- see every request and response in the terminal
+- **405 handling** -- proper "Method Not Allowed" for wrong HTTP verbs
 
 ## Example
 
 ```python
 from pyweb.router import Router
-from pyweb.response import html_response
+from pyweb.response import html_response, json_response
 from pyweb.server import Server
 from pyweb.template import render
 
 router = Router()
 
 @router.get("/")
-def index(request):
+def homepage(request):
     return html_response(render(
         "<h1>Hello, {{ name }}!</h1>",
         {"name": "World"}
     ))
 
-@router.get("/about")
-def about(request):
-    return html_response("<h1>About PyWeb</h1>")
+@router.get("/users/<id>")
+def get_user(request):
+    return json_response({"user_id": request.params["id"]})
 
-server = Server(router)
-server.serve_forever()
+Server(router).serve_forever()
 ```
 
 ## Quick Start
 
 ```bash
+# Install dependencies
 uv sync --all-extras
-uv run pyweb            # Start the demo server
-uv run pytest           # Run tests
+
+# Run the example server
+uv run python examples/hello_server.py
+# Visit http://127.0.0.1:8000
+
+# Run tests
+uv run pytest
 ```
 
-## Features
+## Documentation
 
-- **HTTP request parsing** -- method, path, headers, body, query params
-- **Response building** -- status codes, headers, body, serialization
-- **URL routing** -- match paths to handler functions with decorators
-- **Template engine** -- `{{ placeholder }}` replacement in HTML
-- **TCP server** -- listen, accept, serve (with graceful shutdown)
+Every concept is explained with real-world analogies:
+
+| Concept | Doc | Analogy |
+|---------|-----|---------|
+| Requests | [requests.md](docs/concepts/requests.md) | The incoming letter |
+| Responses | [responses.md](docs/concepts/responses.md) | The reply letter |
+| Routing | [routing.md](docs/concepts/routing.md) | The mailroom |
+| Templates | [templates.md](docs/concepts/templates.md) | Form letters with blanks |
+| Server | [server.md](docs/concepts/server.md) | The post office |
 
 ## License
 
