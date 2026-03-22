@@ -7,7 +7,7 @@ text is parsed correctly into structured Request objects.
 import pytest
 
 from pyweb.errors import ParseError
-from pyweb.request import Request, parse_request
+from pyweb.request import parse_request
 
 
 class TestParseRequestLine:
@@ -67,7 +67,7 @@ class TestParseBody:
 
     def test_body_present(self) -> None:
         """A POST with a body should include it."""
-        raw = "POST /api HTTP/1.1\r\nHost: localhost\r\n\r\n{\"key\": \"value\"}"
+        raw = 'POST /api HTTP/1.1\r\nHost: localhost\r\n\r\n{"key": "value"}'
         req = parse_request(raw)
         assert req.body == '{"key": "value"}'
 
@@ -99,9 +99,9 @@ class TestParseQueryParams:
 
 
 class TestNewlineHandling:
-    """Verify both \\r\\n and \\n line endings work."""
+    r"""Verify both \r\n and \n line endings work."""
 
     def test_unix_line_endings(self) -> None:
-        """Requests with \\n-only should parse."""
+        r"""Request with LF-only line endings should parse."""
         req = parse_request("GET / HTTP/1.1\nHost: localhost\n\n")
         assert req.method == "GET"

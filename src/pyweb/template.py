@@ -8,6 +8,7 @@ This is a deliberately simple engine for learning. Real engines
 """
 
 import re
+from pathlib import Path
 
 # Pattern for {{ variable_name }}.
 _PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*(\w+)\s*\}\}")
@@ -29,7 +30,7 @@ def render(template: str, context: dict[str, str | int | float | bool]) -> str:
         key = match.group(1)
         if key in context:
             return str(context[key])
-        return match.group(0)  # Leave unreplaced if not in context.
+        return match.group(0)
 
     return _PLACEHOLDER_PATTERN.sub(_replace, template)
 
@@ -48,7 +49,5 @@ def render_file(file_path: str, context: dict[str, str | int | float | bool]) ->
         FileNotFoundError: If the template file doesn't exist.
 
     """
-    from pathlib import Path
-
     template = Path(file_path).read_text(encoding="utf-8")
     return render(template, context)

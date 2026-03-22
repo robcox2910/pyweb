@@ -4,7 +4,7 @@ The server is the post office. These tests verify request handling
 without needing real network connections.
 """
 
-from pyweb.response import StatusCode, text_response
+from pyweb.response import text_response
 from pyweb.router import Router
 from pyweb.server import Server
 
@@ -15,8 +15,8 @@ STATUS_500 = 500
 def _make_server() -> Server:
     """Create a test server with a simple route."""
     router = Router()
-    router.add_route("GET", "/", lambda r: text_response("home"))
-    router.add_route("GET", "/error", lambda r: (_ for _ in ()).throw(ValueError("boom")))
+    router.add_route("GET", "/", lambda _r: text_response("home"))
+    router.add_route("GET", "/error", lambda _r: (_ for _ in ()).throw(ValueError("boom")))
     return Server(router)
 
 

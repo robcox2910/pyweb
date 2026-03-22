@@ -8,7 +8,7 @@ piece that makes the web server actually *serve*.
 import socket
 
 from pyweb.request import parse_request
-from pyweb.response import Response, StatusCode, html_response
+from pyweb.response import StatusCode, html_response
 from pyweb.router import Router
 
 DEFAULT_HOST = "127.0.0.1"

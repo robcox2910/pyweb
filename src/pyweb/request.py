@@ -28,9 +28,9 @@ class Request:
 
     method: str
     path: str
-    headers: dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=lambda: {})
     body: str = ""
-    query_params: dict[str, str] = field(default_factory=dict)
+    query_params: dict[str, str] = field(default_factory=lambda: {})
 
 
 def parse_request(raw: str) -> Request:

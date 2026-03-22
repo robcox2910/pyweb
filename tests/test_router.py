@@ -5,7 +5,7 @@ handler based on the method and path.
 """
 
 from pyweb.request import Request
-from pyweb.response import Response, StatusCode, html_response, text_response
+from pyweb.response import Response, text_response
 from pyweb.router import Router
 
 STATUS_200 = 200
@@ -23,7 +23,7 @@ class TestRouterRegistration:
     def test_add_route(self) -> None:
         """Adding a route should register it."""
         router = Router()
-        router.add_route("GET", "/", lambda r: text_response("ok"))
+        router.add_route("GET", "/", lambda _r: text_response("ok"))
         assert len(router.routes) == 1
 
     def test_get_decorator(self) -> None:
@@ -31,7 +31,7 @@ class TestRouterRegistration:
         router = Router()
 
         @router.get("/about")
-        def about(request: Request) -> Response:
+        def about(_request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
             """Serve the about page."""
             return text_response("about")
 
@@ -44,7 +44,7 @@ class TestRouterRegistration:
         router = Router()
 
         @router.post("/api")
-        def create(request: Request) -> Response:
+        def create(_request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
             """Handle a POST."""
             return text_response("created")
 
@@ -57,7 +57,7 @@ class TestRouterDispatch:
     def test_dispatch_matching_route(self) -> None:
         """A matching route should return its handler's response."""
         router = Router()
-        router.add_route("GET", "/", lambda r: text_response("home"))
+        router.add_route("GET", "/", lambda _r: text_response("home"))
         resp = router.dispatch(_make_request("GET", "/"))
         assert resp.body == "home"
         assert resp.status == STATUS_200
@@ -71,16 +71,16 @@ class TestRouterDispatch:
     def test_dispatch_wrong_method(self) -> None:
         """A matching path but wrong method should return 404."""
         router = Router()
-        router.add_route("POST", "/api", lambda r: text_response("ok"))
+        router.add_route("POST", "/api", lambda _r: text_response("ok"))
         resp = router.dispatch(_make_request("GET", "/api"))
         assert resp.status == STATUS_404
 
     def test_multiple_routes(self) -> None:
         """The router should match the correct route from many."""
         router = Router()
-        router.add_route("GET", "/", lambda r: text_response("home"))
-        router.add_route("GET", "/about", lambda r: text_response("about"))
-        router.add_route("POST", "/api", lambda r: text_response("api"))
+        router.add_route("GET", "/", lambda _r: text_response("home"))
+        router.add_route("GET", "/about", lambda _r: text_response("about"))
+        router.add_route("POST", "/api", lambda _r: text_response("api"))
 
         assert router.dispatch(_make_request("GET", "/about")).body == "about"
         assert router.dispatch(_make_request("POST", "/api")).body == "api"

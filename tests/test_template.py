@@ -6,6 +6,8 @@ Templates are form letters with blanks. These tests verify that
 
 from pathlib import Path
 
+import pytest
+
 from pyweb.template import render, render_file
 
 
@@ -60,7 +62,5 @@ class TestRenderFile:
 
     def test_missing_file_raises(self) -> None:
         """A missing template file should raise FileNotFoundError."""
-        import pytest
-
         with pytest.raises(FileNotFoundError):
             render_file("/nonexistent/template.html", {})

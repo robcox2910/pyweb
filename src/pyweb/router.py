@@ -6,11 +6,10 @@ into the right bin (handler) based on its address (path).
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from pyweb.request import Request
 from pyweb.response import Response, not_found
-
 
 # A handler is a function that takes a Request and returns a Response.
 type Handler = Callable[[Request], Response]
@@ -61,7 +60,7 @@ class Router:
         self._routes.append(Route(method=method.upper(), path=path, handler=handler))
 
     def get(self, path: str) -> Callable[[Handler], Handler]:
-        """Decorator to register a GET route.
+        """Register a GET route.
 
         Usage::
 
@@ -78,7 +77,7 @@ class Router:
         return decorator
 
     def post(self, path: str) -> Callable[[Handler], Handler]:
-        """Decorator to register a POST route.
+        """Register a POST route.
 
         Usage::
 

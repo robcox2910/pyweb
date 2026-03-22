@@ -49,7 +49,7 @@ class Response:
     """
 
     status: int = StatusCode.OK
-    headers: dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=lambda: {})
     body: str = ""
 
     def set_content_type(self, content_type: str) -> None:

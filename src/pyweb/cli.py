@@ -5,7 +5,8 @@ Start a web server that serves your routes.
 
 import sys
 
-from pyweb.response import html_response
+from pyweb.request import Request
+from pyweb.response import Response, html_response
 from pyweb.router import Router
 from pyweb.server import DEFAULT_HOST, DEFAULT_PORT, Server
 
@@ -15,7 +16,7 @@ def main() -> None:
     router = Router()
 
     @router.get("/")
-    def index(request):  # noqa: ARG001, ANN001, ANN202
+    def index(_request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
         """Serve the homepage."""
         return html_response("<h1>Welcome to PyWeb!</h1><p>Your web server is running.</p>")
 
