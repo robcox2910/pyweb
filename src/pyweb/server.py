@@ -3,12 +3,18 @@
 The server listens on a port, accepts connections, reads HTTP requests,
 dispatches them to the router, and sends back responses. This is the
 piece that makes the web server actually *serve*.
+
+Think of it like a post office: it opens its doors (binds to a port),
+waits for people to walk in (accepts connections), reads their letters
+(parses requests), sorts them (routes), and hands back replies
+(sends responses).
 """
 
 import socket
+import sys
 
 from pyweb.request import parse_request
-from pyweb.response import StatusCode, html_response
+from pyweb.response import Response, StatusCode, html_response
 from pyweb.router import Router
 
 DEFAULT_HOST = "127.0.0.1"
@@ -20,7 +26,7 @@ BACKLOG = 5
 class Server:
     """A simple HTTP server.
 
-    Creates a TCP socket, listens for connections, and dispatches
+    Create a TCP socket, listen for connections, and dispatch
     requests through a Router.
 
     Args:
@@ -69,24 +75,32 @@ class Server:
         try:
             request = parse_request(raw)
             response = self._router.dispatch(request)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
+            # Never leak internal details to the client.
             response = html_response(
-                f"<h1>500 Internal Server Error</h1><p>{exc}</p>",
+                "<h1>500 Internal Server Error</h1>",
                 status=StatusCode.INTERNAL_ERROR,
             )
+        self._log_request(raw, response)
         return response.to_bytes()
+
+    def _log_request(self, raw: str, response: Response) -> None:
+        """Log a request and its response status."""
+        # Extract the request line for logging.
+        first_line = raw.split("\n", maxsplit=1)[0].strip() if raw else "?"
+        sys.stderr.write(f"{first_line} -> {response.status}\n")
 
     def serve_forever(self) -> None:
         """Start accepting connections and serving requests.
 
-        Blocks until ``stop()`` is called or the process is interrupted.
+        Block until ``stop()`` is called or the process is interrupted.
 
         """
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind((self._host, self._port))
             sock.listen(BACKLOG)
-            sock.settimeout(1.0)  # Allow periodic stop-check.
+            sock.settimeout(1.0)
             self._running = True
 
             while self._running:

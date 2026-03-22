@@ -61,6 +61,12 @@ class TestParseHeaders:
         assert req.headers["Host"] == "example.com"
         assert req.headers["Accept"] == "text/html"
 
+    def test_header_with_colon_in_value(self) -> None:
+        """Header values containing colons should parse correctly."""
+        raw = "GET / HTTP/1.1\r\nAuth: Bearer token:abc:123\r\n\r\n"
+        req = parse_request(raw)
+        assert req.headers["Auth"] == "Bearer token:abc:123"
+
 
 class TestParseBody:
     """Verify body parsing."""
@@ -75,6 +81,13 @@ class TestParseBody:
         """A GET with no body should have empty body."""
         req = parse_request("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         assert req.body == ""
+
+    def test_json_method(self) -> None:
+        """The json() method should parse the body as JSON."""
+        raw = 'POST /api HTTP/1.1\r\n\r\n{"name": "Alice"}'
+        req = parse_request(raw)
+        data = req.json()
+        assert data["name"] == "Alice"
 
 
 class TestParseQueryParams:
@@ -97,11 +110,23 @@ class TestParseQueryParams:
         req = parse_request("GET /about HTTP/1.1\r\n\r\n")
         assert req.query_params == {}
 
+    def test_bare_param(self) -> None:
+        """A parameter without = should have empty string value."""
+        req = parse_request("GET /test?debug HTTP/1.1\r\n\r\n")
+        assert req.query_params["debug"] == ""
+
+    def test_url_decoding(self) -> None:
+        """URL-encoded values should be decoded."""
+        req = parse_request("GET /search?q=hello+world HTTP/1.1\r\n\r\n")
+        assert req.query_params["q"] == "hello world"
+
 
 class TestNewlineHandling:
     r"""Verify both \r\n and \n line endings work."""
 
     def test_unix_line_endings(self) -> None:
-        r"""Request with LF-only line endings should parse."""
-        req = parse_request("GET / HTTP/1.1\nHost: localhost\n\n")
+        r"""Request with \n-only line endings should parse fully."""
+        req = parse_request("GET / HTTP/1.1\nHost: localhost\n\nbody here")
         assert req.method == "GET"
+        assert req.headers["Host"] == "localhost"
+        assert req.body == "body here"
