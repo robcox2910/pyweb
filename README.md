@@ -81,6 +81,10 @@ computing stack is built from scratch:
 | [PyDB](https://github.com/robcox2910/pydb) | Relational databases |
 | [PyStack](https://github.com/robcox2910/pystack) | Full-stack integration |
 | [PyGit](https://github.com/robcox2910/pygit) | Version control |
+| [PyCrypt](https://github.com/robcox2910/pycrypt) | Cryptography |
+| [PyNet](https://github.com/robcox2910/pynet) | Networking |
+| [PySearch](https://github.com/robcox2910/pysearch) | Full-text search |
+| [PyMQ](https://github.com/robcox2910/pymq) | Message queues |
 
 All projects use TDD, comprehensive documentation with real-world
 analogies, and are designed for learners aged 12+.
