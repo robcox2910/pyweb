@@ -9,6 +9,7 @@ from pyweb.response import (
     StatusCode,
     html_response,
     json_response,
+    method_not_allowed,
     not_found,
     text_response,
 )
@@ -65,6 +66,18 @@ class TestResponseHelpers:
         resp = not_found()
         assert resp.status == STATUS_404
         assert "404" in resp.body
+
+    def test_not_found_escapes_html(self) -> None:
+        """not_found must HTML-escape the message (no reflected XSS)."""
+        resp = not_found("No route for GET /<script>alert(1)</script>")
+        assert "<script>" not in resp.body
+        assert "&lt;script&gt;" in resp.body
+
+    def test_method_not_allowed_escapes_html(self) -> None:
+        """method_not_allowed must HTML-escape method names in the body."""
+        resp = method_not_allowed(["<script>"])
+        assert "<script>" not in resp.body
+        assert "&lt;script&gt;" in resp.body
 
     def test_html_with_status(self) -> None:
         """html_response should accept a custom status code."""

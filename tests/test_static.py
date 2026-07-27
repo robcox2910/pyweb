@@ -66,3 +66,17 @@ class TestServeStatic:
         req = Request(method="GET", path="/static/../../../etc/passwd")
         resp = handler(req)
         assert resp.status == STATUS_404
+
+    def test_sibling_prefix_dir_blocked(self, tmp_path: Path) -> None:
+        """A sibling dir sharing a name prefix must NOT be reachable."""
+        base = tmp_path / "static"
+        base.mkdir()
+        secret_dir = tmp_path / "static_secret"
+        secret_dir.mkdir()
+        (secret_dir / "secret.txt").write_text("top secret", encoding="utf-8")
+
+        handler = serve_static(str(base))
+        req = Request(method="GET", path="/static/../static_secret/secret.txt")
+        resp = handler(req)
+        assert resp.status == STATUS_404
+        assert "top secret" not in resp.body

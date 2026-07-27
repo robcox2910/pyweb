@@ -6,6 +6,7 @@ code (did it work?), headers (info about the reply), and a body
 reading someone's request.
 """
 
+import html
 import json
 from dataclasses import dataclass, field
 from enum import IntEnum
@@ -68,9 +69,11 @@ class Response:
         self.headers["Content-Type"] = content_type
 
     def to_bytes(self) -> bytes:
-        """Serialize the response to raw HTTP bytes.
+        """Seal the reply into an envelope of raw HTTP bytes to send.
 
-        Does NOT mutate the Response -- computes Content-Length locally.
+        Turns the status, headers, and body into the exact text a
+        browser expects on the wire. Does NOT mutate the Response --
+        it computes Content-Length locally.
 
         Returns:
             The complete HTTP response as bytes.
@@ -147,8 +150,15 @@ def redirect(url: str, *, permanent: bool = False) -> Response:
 
 
 def not_found(message: str = "Not Found") -> Response:
-    """Create a 404 Not Found response."""
-    return html_response(f"<h1>404</h1><p>{message}</p>", status=StatusCode.NOT_FOUND)
+    """Create a 404 Not Found response.
+
+    The message is HTML-escaped before it lands in the page so a sneaky
+    path like ``/<script>`` can't smuggle code into the browser.
+    """
+    return html_response(
+        f"<h1>404</h1><p>{html.escape(message)}</p>",
+        status=StatusCode.NOT_FOUND,
+    )
 
 
 def method_not_allowed(allowed: list[str]) -> Response:
@@ -158,8 +168,9 @@ def method_not_allowed(allowed: list[str]) -> Response:
         allowed: List of methods that ARE allowed for this path.
 
     """
+    safe_methods = ", ".join(html.escape(method) for method in allowed)
     resp = html_response(
-        f"<h1>405 Method Not Allowed</h1><p>Try: {', '.join(allowed)}</p>",
+        f"<h1>405 Method Not Allowed</h1><p>Try: {safe_methods}</p>",
         status=StatusCode.METHOD_NOT_ALLOWED,
     )
     resp.headers["Allow"] = ", ".join(allowed)

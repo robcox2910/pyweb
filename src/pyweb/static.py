@@ -43,7 +43,11 @@ def guess_mime_type(file_path: Path) -> str:
 
 
 def serve_static(directory: str, url_prefix: str = "/static") -> Callable[[Request], Response]:
-    """Create a handler that serves files from a directory.
+    """Open a folder to visitors and hand back the file they ask for.
+
+    Like a librarian fetching the exact book you name off the shelf:
+    the returned handler looks up the requested file inside *directory*
+    and sends it back as-is (refusing anything outside the folder).
 
     Args:
         directory: The directory to serve files from.
@@ -63,8 +67,11 @@ def serve_static(directory: str, url_prefix: str = "/static") -> Callable[[Reque
 
         file_path = (base_dir / relative).resolve()
 
-        # Security: prevent directory traversal (../).
-        if not str(file_path).startswith(str(base_dir)):
+        # Security: prevent directory traversal (../). A plain string
+        # prefix check would wrongly allow a sibling like
+        # ``/srv/static_secret`` because it starts with ``/srv/static``;
+        # is_relative_to compares real path segments instead.
+        if not file_path.is_relative_to(base_dir):
             return not_found("Access denied")
 
         if not file_path.is_file():
