@@ -13,6 +13,7 @@ waits for people to walk in (accepts connections), reads their letters
 import socket
 import sys
 
+from pyweb.errors import ParseError
 from pyweb.request import parse_request
 from pyweb.response import Response, StatusCode, html_response
 from pyweb.router import Router
@@ -21,6 +22,67 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 BUFFER_SIZE = 4096
 BACKLOG = 5
+
+
+def _content_length(header_text: str) -> int:
+    """Read the Content-Length header value, or 0 if it's absent.
+
+    Content-Length is the sender writing "this letter is N pages long"
+    on the envelope so we know when we've read the whole thing.
+    """
+    for line in header_text.replace("\r\n", "\n").split("\n"):
+        name, sep, value = line.partition(":")
+        if sep and name.strip().lower() == "content-length":
+            try:
+                return int(value.strip())
+            except ValueError:
+                return 0
+    return 0
+
+
+def _read_request(conn: socket.socket) -> str:
+    """Read one whole HTTP request from a socket, body and all.
+
+    A big POST body can arrive in several chunks -- like a long letter
+    split across many envelopes. A naive ``recv`` grabs only the first
+    envelope and truncates the rest, so we keep reading: first until the
+    blank line that ends the headers, then until we've collected the
+    number of body bytes the Content-Length header promised.
+
+    Args:
+        conn: The connected client socket to read from.
+
+    Returns:
+        The full raw HTTP request as a string.
+
+    """
+    data = bytearray()
+
+    # 1. Read until the blank line that separates headers from body.
+    while b"\r\n\r\n" not in data and b"\n\n" not in data:
+        chunk = conn.recv(BUFFER_SIZE)
+        if not chunk:
+            return data.decode("utf-8", errors="replace")
+        data.extend(chunk)
+
+    # 2. Find where the body starts.
+    header_end = data.find(b"\r\n\r\n")
+    separator_len = 4
+    if header_end == -1:
+        header_end = data.find(b"\n\n")
+        separator_len = 2
+    body_start = header_end + separator_len
+
+    # 3. Keep reading until the whole promised body has arrived.
+    header_text = data[:header_end].decode("utf-8", errors="replace")
+    content_length = _content_length(header_text)
+    while len(data) - body_start < content_length:
+        chunk = conn.recv(BUFFER_SIZE)
+        if not chunk:
+            break
+        data.extend(chunk)
+
+    return data.decode("utf-8", errors="replace")
 
 
 class Server:
@@ -74,13 +136,21 @@ class Server:
         """
         try:
             request = parse_request(raw)
-            response = self._router.dispatch(request)
-        except Exception:  # noqa: BLE001
-            # Never leak internal details to the client.
+        except ParseError:
+            # The client sent us garbage -- that's their mistake, not ours.
             response = html_response(
-                "<h1>500 Internal Server Error</h1>",
-                status=StatusCode.INTERNAL_ERROR,
+                "<h1>400 Bad Request</h1>",
+                status=StatusCode.BAD_REQUEST,
             )
+        else:
+            try:
+                response = self._router.dispatch(request)
+            except Exception:  # noqa: BLE001
+                # Our own mistake -- never leak internal details to the client.
+                response = html_response(
+                    "<h1>500 Internal Server Error</h1>",
+                    status=StatusCode.INTERNAL_ERROR,
+                )
         self._log_request(raw, response)
         return response.to_bytes()
 
@@ -110,7 +180,7 @@ class Server:
                     continue
 
                 with conn:
-                    raw = conn.recv(BUFFER_SIZE).decode("utf-8", errors="replace")
+                    raw = _read_request(conn)
                     if raw:
                         response_bytes = self.handle_request(raw)
                         conn.sendall(response_bytes)

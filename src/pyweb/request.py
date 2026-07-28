@@ -49,13 +49,19 @@ class Request:
     params: dict[str, str] = field(default_factory=lambda: {})
 
     def json(self) -> dict[str, object]:
-        """Parse the request body as JSON.
+        """Unpack the letter's contents as structured data (a dictionary).
+
+        Reads the request body -- which is expected to be JSON text like
+        ``{"name": "Alice"}`` -- and turns it into a Python dictionary
+        you can look things up in.
 
         Returns:
             The parsed JSON as a dictionary.
 
         Raises:
             ValueError: If the body is not valid JSON.
+            TypeError: If the JSON is valid but not an object (e.g. a
+                list or number), since only objects become dictionaries.
 
         """
         raw = json.loads(self.body)

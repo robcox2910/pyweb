@@ -68,13 +68,21 @@ PyWeb can serve files directly from a folder -- HTML pages, CSS
 stylesheets, images, and JavaScript:
 
 ```python
-from pyweb.static import static_handler
-
-router.add_route("GET", "/static", static_handler("./public"))
+router.static("/static", "./public")
 ```
 
 Now files in the `./public` folder are accessible at `/static/style.css`,
 `/static/logo.png`, etc.
+
+Under the hood, `router.static(...)` registers a wildcard route
+(`GET /static/*`) so that every sub-path -- not just `/static` exactly --
+routes to the file server. If you prefer the explicit form:
+
+```python
+from pyweb.static import serve_static
+
+router.add_route("GET", "/static/*", serve_static("./public"))
+```
 
 ## Logging
 
@@ -90,7 +98,8 @@ POST /api/data -> 201 Created
 ## What We Test
 
 - The server processes valid requests and returns correct responses.
-- Malformed requests return 500 Internal Server Error.
+- Malformed requests (the client's fault) return 400 Bad Request.
+- Handlers that crash (our fault) return 500 Internal Server Error.
 - Unknown paths return 404.
 - The server can be started and stopped.
 

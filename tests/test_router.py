@@ -4,9 +4,12 @@ The router is the mailroom -- it sorts incoming requests to the right
 handler based on the method and path.
 """
 
+from pathlib import Path
+
 from pyweb.request import Request
 from pyweb.response import Response, text_response
 from pyweb.router import Router
+from pyweb.static import serve_static
 
 STATUS_200 = 200
 STATUS_404 = 404
@@ -113,3 +116,34 @@ class TestPathParameters:
         router.add_route("GET", "/users/<id>", lambda _r: text_response("ok"))
         resp = router.dispatch(_make_request("GET", "/posts/42"))
         assert resp.status == STATUS_404
+
+
+class TestWildcardRoutes:
+    """Verify trailing-``*`` wildcard routes and static mounting."""
+
+    def test_wildcard_matches_subpath(self) -> None:
+        """A trailing * should match sub-paths including slashes."""
+        router = Router()
+        router.add_route("GET", "/files/*", lambda r: text_response(r.params["wildcard"]))
+        resp = router.dispatch(_make_request("GET", "/files/docs/readme.txt"))
+        assert resp.status == STATUS_200
+        assert resp.body == "docs/readme.txt"
+
+    def test_serve_static_via_router(self, tmp_path: Path) -> None:
+        """End-to-end: serve_static in a Router should serve a sub-path file."""
+        (tmp_path / "style.css").write_text("body { color: red; }", encoding="utf-8")
+        router = Router()
+        router.add_route("GET", "/static/*", serve_static(str(tmp_path)))
+        resp = router.dispatch(_make_request("GET", "/static/style.css"))
+        assert resp.status == STATUS_200
+        assert "body { color: red; }" in resp.body
+        assert resp.headers["Content-Type"] == "text/css"
+
+    def test_static_helper(self, tmp_path: Path) -> None:
+        """Router.static should mount a folder and serve its files."""
+        (tmp_path / "app.js").write_text("console.log('hi');", encoding="utf-8")
+        router = Router()
+        router.static("/assets", str(tmp_path))
+        resp = router.dispatch(_make_request("GET", "/assets/app.js"))
+        assert resp.status == STATUS_200
+        assert "console.log('hi');" in resp.body

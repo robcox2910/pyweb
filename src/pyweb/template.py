@@ -15,7 +15,11 @@ _PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
 
 def render(template: str, context: dict[str, str | int | float | bool]) -> str:
-    """Render a template by replacing {{ placeholders }} with values.
+    """Fill in a form letter's blanks with real values.
+
+    Wherever the template has a ``{{ name }}`` blank, this drops in the
+    matching value from *context* -- like filling "Dear ____" with a
+    real name. Blanks with no matching value are left untouched.
 
     Args:
         template: The template string with {{ name }} placeholders.

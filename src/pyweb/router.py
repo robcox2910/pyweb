@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 
 from pyweb.request import Request
 from pyweb.response import Response, method_not_allowed, not_found
+from pyweb.static import serve_static
 
 # A handler is a function that takes a Request and returns a Response.
 type Handler = Callable[[Request], Response]
@@ -43,10 +44,15 @@ class Route:
 
 
 def _compile_path(path: str) -> tuple[re.Pattern[str], list[str]]:
-    """Compile a path pattern with <params> into a regex.
+    """Compile a path pattern with <params> or a trailing * into a regex.
+
+    A ``<name>`` placeholder matches a single path segment (no slashes),
+    like a single house number. A trailing ``*`` is a wildcard that
+    matches the rest of the path (slashes included) -- handy for mounting
+    a whole folder of static files at ``/static/*``.
 
     Args:
-        path: The path pattern (e.g., "/users/<id>").
+        path: The path pattern (e.g., "/users/<id>" or "/static/*").
 
     Returns:
         A tuple of (compiled regex, list of parameter names).
@@ -62,7 +68,15 @@ def _compile_path(path: str) -> tuple[re.Pattern[str], list[str]]:
         param_names.append(match.group(1))
         last_end = match.end()
 
-    regex_parts.append(re.escape(path[last_end:]))
+    remainder = path[last_end:]
+    if remainder.endswith("*"):
+        # Trailing wildcard: capture everything left, slashes and all.
+        regex_parts.append(re.escape(remainder[:-1]))
+        regex_parts.append(r"(.*)")
+        param_names.append("wildcard")
+    else:
+        regex_parts.append(re.escape(remainder))
+
     pattern = re.compile("^" + "".join(regex_parts) + "$")
     return pattern, param_names
 
@@ -94,9 +108,25 @@ class Router:
 
         """
         route = Route(method=method.upper(), path=path, handler=handler)
-        if "<" in path:
+        if "<" in path or path.endswith("*"):
             route.pattern, route.param_names = _compile_path(path)
         self._routes.append(route)
+
+    def static(self, url_prefix: str, directory: str) -> None:
+        """Serve a whole folder of files under a URL prefix.
+
+        Like opening a filing cabinet to visitors: every file in
+        *directory* becomes reachable at ``<url_prefix>/<filename>``.
+        For example ``router.static("/static", "./public")`` makes
+        ``./public/style.css`` available at ``/static/style.css``.
+
+        Args:
+            url_prefix: The URL prefix to mount the folder under.
+            directory: The folder on disk to serve files from.
+
+        """
+        prefix = url_prefix.rstrip("/")
+        self.add_route("GET", f"{prefix}/*", serve_static(directory, prefix))
 
     def _route_decorator(self, method: str, path: str) -> Callable[[Handler], Handler]:
         """Create a decorator that registers a route for *method* and *path*.
@@ -137,7 +167,10 @@ class Router:
         return self._route_decorator("DELETE", path)
 
     def dispatch(self, request: Request) -> Response:
-        """Find and call the handler for a request.
+        """Sort one incoming letter to the right handler and run it.
+
+        This is the mail clerk at work: read the address (path) and the
+        request type (method), find the matching bin, and deliver.
 
         Args:
             request: The incoming HTTP request.
