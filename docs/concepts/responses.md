@@ -40,6 +40,11 @@ an image?) and how big it is.
 
 The actual content -- the HTML page, the JSON data, or the image.
 
+Text (like HTML) is turned into bytes using UTF-8 before it's sent. But a
+picture isn't text at all -- it's just a long list of numbers -- so PyWeb
+lets a body be raw **bytes** too, and sends them exactly as they are.
+Trying to read a PNG as text would be like trying to read a photo out loud.
+
 ## Building Responses in PyWeb
 
 ```python

@@ -65,17 +65,20 @@ class TestResponseHelpers:
         """not_found should return a 404 response."""
         resp = not_found()
         assert resp.status == STATUS_404
+        assert isinstance(resp.body, str)
         assert "404" in resp.body
 
     def test_not_found_escapes_html(self) -> None:
         """not_found must HTML-escape the message (no reflected XSS)."""
         resp = not_found("No route for GET /<script>alert(1)</script>")
+        assert isinstance(resp.body, str)
         assert "<script>" not in resp.body
         assert "&lt;script&gt;" in resp.body
 
     def test_method_not_allowed_escapes_html(self) -> None:
         """method_not_allowed must HTML-escape method names in the body."""
         resp = method_not_allowed(["<script>"])
+        assert isinstance(resp.body, str)
         assert "<script>" not in resp.body
         assert "&lt;script&gt;" in resp.body
 

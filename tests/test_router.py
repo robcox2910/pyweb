@@ -136,7 +136,7 @@ class TestWildcardRoutes:
         router.add_route("GET", "/static/*", serve_static(str(tmp_path)))
         resp = router.dispatch(_make_request("GET", "/static/style.css"))
         assert resp.status == STATUS_200
-        assert "body { color: red; }" in resp.body
+        assert b"body { color: red; }" in resp.to_bytes()
         assert resp.headers["Content-Type"] == "text/css"
 
     def test_static_helper(self, tmp_path: Path) -> None:
@@ -146,4 +146,4 @@ class TestWildcardRoutes:
         router.static("/assets", str(tmp_path))
         resp = router.dispatch(_make_request("GET", "/assets/app.js"))
         assert resp.status == STATUS_200
-        assert "console.log('hi');" in resp.body
+        assert b"console.log('hi');" in resp.to_bytes()

@@ -77,7 +77,9 @@ def serve_static(directory: str, url_prefix: str = "/static") -> Callable[[Reque
         if not file_path.is_file():
             return not_found(f"File not found: {relative}")
 
-        content = file_path.read_text(encoding="utf-8")
+        # Send the file exactly as it sits on disk. Reading it as text would
+        # break pictures and icons, which aren't text at all.
+        content = file_path.read_bytes()
         mime = guess_mime_type(file_path)
         resp = Response(status=StatusCode.OK, body=content)
         resp.set_content_type(mime)
