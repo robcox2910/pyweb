@@ -55,13 +55,14 @@ class Response:
     Args:
         status: The HTTP status code.
         headers: Response headers.
-        body: The response body.
+        body: The response body -- text (sent as UTF-8) or raw bytes
+            (for pictures and other files that aren't text).
 
     """
 
     status: int = StatusCode.OK
     headers: dict[str, str] = field(default_factory=lambda: {})
-    body: str = ""
+    body: str | bytes = ""
 
     def set_content_type(self, content_type: str) -> None:
         """Set the Content-Type header.
@@ -86,7 +87,8 @@ class Response:
         phrase = STATUS_PHRASES.get(self.status, "Unknown")
         status_line = f"HTTP/1.1 {self.status} {phrase}"
 
-        body_bytes = self.body.encode("utf-8")
+        # Text gets encoded as UTF-8; bytes (like a PNG) go out untouched.
+        body_bytes = self.body if isinstance(self.body, bytes) else self.body.encode("utf-8")
         # Build headers with auto Content-Length (without mutating self).
         all_headers = {**self.headers, "Content-Length": str(len(body_bytes))}
         header_lines = [f"{k}: {v}" for k, v in all_headers.items()]
