@@ -5,6 +5,10 @@ without needing real network connections.
 """
 
 import socket
+import struct
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from pyweb.request import Request
 from pyweb.response import Response, text_response
@@ -16,6 +20,8 @@ STATUS_404 = 404
 STATUS_500 = 500
 DEFAULT_PORT = 8000
 LARGE_BODY_SIZE = 5000
+QUICK_CLIENT_TIMEOUT = 0.3  # seconds a silent client may hog the server in tests
+WAIT_SECONDS = 5.0
 
 
 def _make_server() -> Server:
@@ -114,3 +120,75 @@ class TestReadRequest:
         finally:
             server_side.close()
         assert raw == ""
+
+
+@contextmanager
+def _running_server() -> Iterator[Server]:
+    """Run a real server on a free port in a background thread."""
+    router = Router()
+    router.add_route("GET", "/", lambda _r: text_response("home"))
+    server = Server(router, port=0, client_timeout=QUICK_CLIENT_TIMEOUT)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    assert server.ready.wait(WAIT_SECONDS), "server never started listening"
+    try:
+        yield server
+    finally:
+        server.stop()
+        thread.join(WAIT_SECONDS)
+        assert not thread.is_alive(), "server did not stop"
+
+
+def _send(server: Server, raw: bytes) -> bytes:
+    """Send raw bytes as one client and return everything the server replies."""
+    with socket.create_connection((server.host, server.port), timeout=WAIT_SECONDS) as client:
+        client.sendall(raw)
+        chunks: list[bytes] = []
+        while chunk := client.recv(4096):
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+
+def _get_home(server: Server) -> bytes:
+    """Fetch ``/`` as a well-behaved client would."""
+    return _send(server, b"GET / HTTP/1.1\r\nHost: test\r\n\r\n")
+
+
+class TestServerSurvivesBadClients:
+    """One misbehaving visitor must never close the post office for everyone."""
+
+    def test_client_that_hangs_up_mid_request_does_not_crash_the_server(self) -> None:
+        """Regression: a connection reset used to escape serve_forever and kill it."""
+        with _running_server() as server:
+            rude = socket.create_connection((server.host, server.port))
+            rude.sendall(b"GET / HTTP/1.1\r\n")
+            # SO_LINGER 0 makes close() send a reset instead of a polite goodbye.
+            rude.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            rude.close()
+            assert b"200 OK" in _get_home(server)
+
+    def test_silent_client_does_not_freeze_the_server(self) -> None:
+        """Regression: a client that never spoke used to block everyone forever."""
+        with _running_server() as server, socket.create_connection((server.host, server.port)):
+            assert b"200 OK" in _get_home(server)
+
+    def test_huge_headers_are_refused_with_431(self) -> None:
+        """Headers that never end are cut off instead of eating all memory."""
+        with _running_server() as server:
+            reply = _send(server, b"GET / HTTP/1.1\r\nX-Junk: " + b"a" * 100_000)
+            assert reply.startswith(b"HTTP/1.1 431")
+            assert b"200 OK" in _get_home(server)
+
+    def test_huge_body_is_refused_with_413(self) -> None:
+        """A body bigger than the limit is refused before we try to read it."""
+        with _running_server() as server:
+            reply = _send(
+                server,
+                b"POST / HTTP/1.1\r\nContent-Length: 999999999\r\n\r\nhi",
+            )
+            assert reply.startswith(b"HTTP/1.1 413")
+
+    def test_port_zero_picks_a_free_port(self) -> None:
+        """Asking for port 0 lets the operating system pick, and we report it."""
+        with _running_server() as server:
+            assert server.port != 0

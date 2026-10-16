@@ -27,6 +27,8 @@ class StatusCode(IntEnum):
     BAD_REQUEST = 400
     NOT_FOUND = 404
     METHOD_NOT_ALLOWED = 405
+    PAYLOAD_TOO_LARGE = 413
+    HEADERS_TOO_LARGE = 431
     INTERNAL_ERROR = 500
 
 
@@ -40,6 +42,8 @@ STATUS_PHRASES: dict[int, str] = {
     400: "Bad Request",
     404: "Not Found",
     405: "Method Not Allowed",
+    413: "Payload Too Large",
+    431: "Request Header Fields Too Large",
     500: "Internal Server Error",
 }
 

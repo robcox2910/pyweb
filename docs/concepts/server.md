@@ -95,6 +95,24 @@ GET /missing -> 404 Not Found
 POST /api/data -> 201 Created
 ```
 
+## Surviving Rude Visitors
+
+Our post office serves **one visitor at a time**. That keeps the code
+simple, but it means one badly-behaved visitor could close the doors on
+everyone else. So the server protects itself:
+
+- **The visitor who hangs up halfway.** If a connection breaks mid-request
+  (a "reset"), we shrug, drop that one connection, and serve the next person.
+- **The visitor who says nothing.** Every visitor gets a time limit
+  (`CLIENT_TIMEOUT`, 5 seconds). If they stand silently at the counter, we
+  politely show them out so the queue keeps moving.
+- **The endless letter.** Headers bigger than 16 KB get `431 Request Header
+  Fields Too Large`; a body bigger than 1 MB gets `413 Payload Too Large` --
+  answered *before* we try to read it all into memory.
+
+Real servers like nginx do all of these too (and serve many visitors at
+once, which is a lesson for another day).
+
 ## What We Test
 
 - The server processes valid requests and returns correct responses.
@@ -102,6 +120,9 @@ POST /api/data -> 201 Created
 - Handlers that crash (our fault) return 500 Internal Server Error.
 - Unknown paths return 404.
 - The server can be started and stopped.
+- A real server on a free port survives a client that hangs up halfway,
+  a client that never speaks, oversized headers (431) and an oversized
+  body (413) -- and keeps serving the next visitor.
 
 ## What's Next?
 
