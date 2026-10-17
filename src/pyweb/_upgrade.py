@@ -97,12 +97,12 @@ class WebSocketSession:
             self.stop()
         try:
             await self._talk(ws)
+            if self._closer is not None:
+                await self._closer  # inside the try: a cancel here stops it too
         except Cancelled:
             if self._closer is not None:
                 self._closer.cancel()
             raise
-        if self._closer is not None:
-            await self._closer
         return SWITCHING_PROTOCOLS
 
     async def _talk(self, ws: WebSocket) -> None:
