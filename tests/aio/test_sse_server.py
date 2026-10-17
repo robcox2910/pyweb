@@ -11,7 +11,7 @@ from pyweb.app import App
 from pyweb.aserver import AsyncServer
 from pyweb.messages import HttpRequest
 from pyweb.sse import EventHub, EventStream, ServerEvent, encode_event
-from tests.aio.test_aserver import (
+from tests.aio._helpers import (
     GRACE,
     OK,
     SERVER_ERROR,

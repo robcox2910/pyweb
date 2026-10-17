@@ -11,8 +11,8 @@ from pyweb.aserver import AsyncServer
 from pyweb.auth import InMemoryUsers, SessionAuth, _required_roles, current_user, require
 from pyweb.messages import Headers, HTTPError, HttpRequest, HttpResponse, QueryParams
 from pyweb.security import SessionSigner
-from tests.aio.test_aserver import HOST, Reply, connect, exchange, read_reply, send, serve
-from tests.aio.test_auth import ADA_WORD, BOB_WORD, DEMO_KEY, ROUNDS, go
+from tests.aio._auth_helpers import ADA_WORD, BOB_WORD, DEMO_KEY, ROUNDS, go
+from tests.aio._helpers import HOST, Reply, connect, exchange, read_reply, send, serve
 
 SWITCHING = 101
 UNAUTHORIZED = 401

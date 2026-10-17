@@ -2,106 +2,44 @@
 
 import logging
 import re
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 
 import pytest
 from pynet.errors import NetConnectionError
 from pynet.loop import Event, get_running_loop, run, sleep, spawn, timeout
-from pynet.streams import StreamReader, StreamWriter, open_connection
+from pynet.streams import StreamWriter, open_connection
 
 from pyweb.app import App
 from pyweb.aserver import AsyncServer
 from pyweb.http1 import Limits
 from pyweb.messages import Headers, HttpRequest, HttpResponse, empty, text
+from tests.aio._helpers import (
+    BAD_REQUEST,
+    HOST,
+    OK,
+    SERVER_ERROR,
+    WAIT,
+    Reply,
+    connect,
+    exchange,
+    read_reply,
+    send,
+    serve,
+)
 
-HOST = "127.0.0.1"
-OK = 200
 NO_CONTENT = 204
-BAD_REQUEST = 400
 NOT_FOUND = 404
 TIMEOUT = 408
 LENGTH_REQUIRED = 411
 TOO_LARGE = 413
 HEADERS_TOO_LARGE = 431
-SERVER_ERROR = 500
 NOT_IMPLEMENTED = 501
 UNAVAILABLE = 503
 BAD_VERSION = 505
-WAIT = 1.0
-GRACE = 0.2
 SHORT = 0.2
 STALL_BUDGET = 0.5
 HEAD_LIMIT = 1024
 MAX_CONNECTIONS = 2
 BIG_BODY = 64 * 1024 * 1024
-
-FAST = Limits(header_timeout=WAIT, body_timeout=WAIT, keepalive_timeout=WAIT, write_timeout=WAIT)
-
-
-@dataclass
-class Reply:
-    """One HTTP response as the client saw it."""
-
-    status: int
-    headers: dict[str, str]
-    body: bytes
-
-
-async def read_reply(reader: StreamReader, *, head_only: bool = False) -> Reply:
-    """Read one response; trust Content-Length for the body unless ``head_only``."""
-    raw = await reader.read_until(b"\r\n\r\n")
-    status_line, *lines = raw[:-4].decode("latin-1").split("\r\n")
-    headers: dict[str, str] = {}
-    for line in lines:
-        name, _, value = line.partition(":")
-        headers[name.lower()] = value.strip()
-    length = 0 if head_only else int(headers.get("content-length", "0"))
-    body = await reader.read_exactly(length)
-    return Reply(int(status_line.split(" ")[1]), headers, body)
-
-
-async def connect(server: AsyncServer) -> tuple[StreamReader, StreamWriter]:
-    """Open a client connection to the server."""
-    return await open_connection(HOST, server.port)
-
-
-async def send(writer: StreamWriter, raw: bytes) -> None:
-    """Write raw bytes and flush them."""
-    writer.write(raw)
-    await writer.drain()
-
-
-async def exchange(server: AsyncServer, raw: bytes) -> tuple[Reply, bytes]:
-    """Send raw bytes on a new connection; return the reply and what follows it."""
-    reader, writer = await connect(server)
-    await send(writer, raw)
-    reply = await read_reply(reader)
-    rest = await reader.read()
-    writer.close()
-    return reply, rest
-
-
-def serve[T](
-    app: App,
-    client: Callable[[AsyncServer], Awaitable[T]],
-    limits: Limits = FAST,
-    *,
-    access_log: bool = True,
-) -> T:
-    """Start a server on a free port, run ``client`` against it, then close."""
-
-    async def main() -> T:
-        """Run the client with a deadline and always close the server."""
-        server = AsyncServer(app, limits=limits, access_log=access_log)
-        await server.start(HOST, 0)
-        try:
-            async with timeout(WAIT * 2):
-                return await client(server)
-        finally:
-            await server.close(grace=GRACE)
-
-    return run(main())
 
 
 def hello_app() -> App:

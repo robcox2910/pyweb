@@ -11,7 +11,7 @@ from pyweb.app import App, CallNext, WebSocketUpgrade
 from pyweb.aserver import AsyncServer
 from pyweb.http1 import STATUS_REASONS
 from pyweb.messages import Headers, HttpRequest, HttpResponse, Outcome, QueryParams, text
-from tests.aio.test_aserver import (
+from tests.aio._helpers import (
     BAD_REQUEST,
     GRACE,
     HOST,

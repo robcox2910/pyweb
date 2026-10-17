@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from pyweb.testing import TestClient, TestResponse
-from tests.aio.test_auth import (
+from tests.aio._auth_helpers import (
     ADA_WORD,
     BOB_WORD,
     FORBIDDEN,

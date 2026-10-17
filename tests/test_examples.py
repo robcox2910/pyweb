@@ -9,11 +9,12 @@ from pynet.loop import run
 from pynet.streams import open_connection
 from pynet.ws import connect_websocket
 
+from pyweb import cli
 from pyweb.aserver import AsyncServer
 from pyweb.cli import demo_app
+from pyweb.server import Server
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
-OK_STATUS = 200
 
 
 def load_example(name: str) -> ModuleType:
@@ -86,3 +87,26 @@ class TestAsyncDemo:
         assert b"PyWeb" in page
         assert tick.startswith(b"data:")
         assert echoed == "echo: hi"
+
+
+class TestPlainCli:
+    """Test that ``pyweb`` with no flag still starts the old threaded server."""
+
+    def test_no_flag_builds_the_sync_server(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Build a ``pyweb.server.Server`` and stop cleanly on Ctrl-C."""
+        started: list[object] = []
+
+        def fake_serve_forever(self: Server) -> None:
+            """Note the server instead of serving, then act like Ctrl-C."""
+            started.append(self)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(Server, "serve_forever", fake_serve_forever)
+        cli.main([])
+        output = capsys.readouterr().out
+        assert len(started) == 1
+        assert isinstance(started[0], Server)
+        assert "PyWeb serving on http://" in output
+        assert "Server stopped." in output
