@@ -21,6 +21,7 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol, cast
 
 from pynet.loop import run_in_thread
@@ -32,6 +33,7 @@ from pyweb._handlers import (
     server_error,
     without_body,
 )
+from pyweb.astatic import static_handler
 from pyweb.http1 import KNOWN_METHODS
 from pyweb.messages import (
     Headers,
@@ -213,6 +215,18 @@ class App:
             return fn
 
         return register
+
+    def mount_static(self, prefix: str, directory: str | Path, *, max_age: int = 3600) -> None:
+        """Serve the files of a folder under a URL prefix, with ETag caching.
+
+        Args:
+            prefix: The URL start, such as ``"/static"``.
+            directory: The folder to serve.
+            max_age: Seconds a browser may reuse a file without asking.
+
+        """
+        fn = static_handler(directory, max_age=max_age)
+        self._routes.add("GET", prefix.rstrip("/") + "/<path:file>", _Route(fn, True, False))
 
     def middleware(self, fn: Middleware) -> Middleware:
         """Register middleware; the first registered runs outermost."""
