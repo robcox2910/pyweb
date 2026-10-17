@@ -117,7 +117,79 @@ ever logs a password, a token, a cookie value or a CSRF token.
 - **Belt and braces.** The session cookie is `HttpOnly` (page scripts
   cannot read it) and `SameSite=Lax` (browsers do not send it with most
   requests from other sites). The token protects you even where a
-  browser ignores `SameSite`.
+  browser ignores `SameSite`. `SameSite` is not enough on its own:
+  "same site" counts every port on the same machine, so a page on
+  `localhost:3000` still gets your `localhost:8000` cookie.
+- **WebSockets check the Origin instead.** See below.
+
+## WebSockets: Which House Is Calling?
+
+A WebSocket handshake is a `GET`, so it carries no CSRF sticker, yet the
+browser still adds your cookie -- even when a page from *another* site
+dials the number. Without a check, that page could open a phone line in
+your name (this is called *cross-site WebSocket hijacking*).
+
+So the phone line checks which house the call comes from. Browsers put
+an `Origin` header (the page's `scheme://host:port`) on every WebSocket
+handshake, and a page cannot fake it. For a visitor logged in by
+**cookie**, `SessionAuth` only puts the call through when the `Origin`,
+without its `http://` or `https://`, equals the `Host` the browser
+dialled -- or is one of the exact `"http(s)://host:port"` strings you
+list in `SessionAuth(..., allowed_origins=[...])`. A different or
+missing `Origin` gets `403`. Bearer tokens and strangers are not
+checked: another site cannot make a browser send your API token.
+
+```python
+from pynet.loop import run
+
+from pyweb.app import App
+from pyweb.auth import InMemoryUsers, SessionAuth
+from pyweb.messages import empty
+from pyweb.security import SessionSigner
+from pyweb.testing import TestClient
+
+users = InMemoryUsers()
+ada = users.add("ada", "demo-password-not-real", rounds=1_000)
+signer = SessionSigner("demo-key-not-real-0123456789abcdef")
+auth = SessionAuth(signer, users, allowed_origins=["http://localhost:3000"])
+app = App()
+app.middleware(auth)
+
+
+@app.websocket("/chat")
+async def chat(ws, request):
+    await ws.send_text("hello")
+
+
+def wristband():
+    response = empty()
+    auth.login(response, ada)
+    return response.headers.get("Set-Cookie").split(";")[0].split("=", 1)[1]
+
+
+async def main():
+    browser = TestClient(app, cookies={"session": wristband()})
+    dial = {"Upgrade": "websocket", "Connection": "Upgrade"}
+    for origin in ["http://testserver", "http://localhost:3000", "http://evil.example"]:
+        answer = await browser.get("/chat", headers={**dial, "Origin": origin})
+        print(origin, answer.status)
+    print("no Origin", (await browser.get("/chat", headers=dial)).status)
+
+
+run(main())
+```
+
+Output:
+
+```text
+http://testserver 101
+http://localhost:3000 101
+http://evil.example 403
+no Origin 403
+```
+
+(The `TestClient` always sends `Host: testserver`, so that is "our own
+house" here; `101` means "put through".)
 
 ## What We Test
 
@@ -128,6 +200,9 @@ ever logs a password, a token, a cookie value or a CSRF token.
   token is refused.
 - A wrong header is not rescued by a right form field.
 - Bearer tokens are exempt; strangers can still post the login form.
+- Over a real socket, a cookie WebSocket upgrade from our own origin or
+  an allow-listed one gets `101`; another port, `Origin: null` or no
+  `Origin` gets `403`; a bearer upgrade with no `Origin` gets `101`.
 - Walking through every flow at `DEBUG` logging, no password, token,
   cookie value or CSRF token appears in any log record.
 

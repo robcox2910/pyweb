@@ -97,7 +97,8 @@ handler with `authenticate(users, throttle, name, password)` and then
 - **WebSocket doors too.** `@app.websocket(...)` routes can use
   `require`. `SessionAuth` checks them *before* the handshake, so a
   stranger gets a plain `401` (never a redirect) and the WebSocket is
-  never opened.
+  never opened. A cookie visitor must also be calling from your own site
+  (the `Origin` check in [CSRF Protection](csrf.md)).
 - **API tokens.** `auth.api_token(user)` makes a token for scripts to send
   as `Authorization: Bearer <token>`. If that header is sent, it is the
   only thing looked at: a bad token means "stranger", even with a good

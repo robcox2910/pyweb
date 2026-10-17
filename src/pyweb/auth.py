@@ -21,7 +21,7 @@ import functools
 import inspect
 import logging
 import weakref
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import cast
 from urllib.parse import quote
 
@@ -53,6 +53,12 @@ _DEFAULT_LOGIN_PATH = "/login"
 _SESSION_KIND = "session"
 _API_KIND = "api"
 _MAX_UNWRAP = 100
+_WEB_SCHEMES = frozenset({"http", "https"})
+
+
+def _normal_origin(origin: str) -> str:
+    """Return an origin trimmed and lower-cased, for comparing."""
+    return origin.strip().lower().rstrip("/")
 
 
 def safe_next(target: str | None) -> str:
@@ -213,6 +219,7 @@ class SessionAuth:
         cookie_name: str = "session",
         login_path: str = _DEFAULT_LOGIN_PATH,
         secure_cookies: bool = False,
+        allowed_origins: Iterable[str] = (),
     ) -> None:
         """Create the middleware.
 
@@ -222,6 +229,9 @@ class SessionAuth:
             cookie_name: The session cookie's name.
             login_path: Where ``require`` sends browsers that must log in.
             secure_cookies: Mark the cookie ``Secure`` (use it on HTTPS).
+            allowed_origins: Other sites (exact ``"http(s)://host:port"``
+                strings) whose pages may open a WebSocket with the
+                visitor's cookie. The page's own site is always allowed.
 
         """
         self._signer = signer
@@ -229,14 +239,16 @@ class SessionAuth:
         self._cookie_name = cookie_name
         self._login_path = login_path
         self._secure = secure_cookies
+        self._allowed_origins = frozenset(_normal_origin(origin) for origin in allowed_origins)
 
     async def __call__(self, request: HttpRequest, call_next: CallNext) -> Outcome:
         """Set ``request.user``, check CSRF, and guard WebSocket upgrades.
 
         Raises:
             HTTPError: ``403`` ("csrf") for a cookie visitor's unsafe request
-                without the right token; ``401``/``403`` for an upgrade to a
-                ``require``-guarded WebSocket route.
+                without the right token; ``403`` ("origin") for a cookie
+                visitor's upgrade from another site; ``401``/``403`` for an
+                upgrade to a ``require``-guarded WebSocket route.
 
         """
         request.state[_LOGIN_PATH_KEY] = self._login_path
@@ -247,10 +259,32 @@ class SessionAuth:
         outcome = await call_next(request)
         if isinstance(outcome, WebSocketUpgrade):
             # Upgrades must be refused before the handshake, so check here.
+            # The CSRF token cannot ride on a WebSocket handshake, so a
+            # cookie upgrade must come from a page on an allowed site.
+            if claims is not None and not self._origin_allowed(request):
+                logger.info("WebSocket upgrade refused: Origin not allowed for %s", request.path)
+                raise HTTPError(_FORBIDDEN, "origin")
             roles = _required_roles(outcome.handler)
             if roles is not None:
                 _check(outcome.request, roles, allow_redirect=False)
         return outcome
+
+    def _origin_allowed(self, request: HttpRequest) -> bool:
+        """Return whether the ``Origin`` is this site or an allowed one.
+
+        "This site" means the Origin without its ``http://`` or
+        ``https://`` equals the ``Host`` header. A missing Origin is
+        refused: browsers always send one on a WebSocket handshake.
+        """
+        origin = request.headers.get("Origin")
+        if origin is None:
+            return False
+        origin = _normal_origin(origin)
+        if origin in self._allowed_origins:
+            return True
+        scheme, sep, host_port = origin.partition("://")
+        host = (request.headers.get("Host") or "").strip().lower()
+        return bool(sep) and scheme in _WEB_SCHEMES and bool(host) and host_port == host
 
     def _identify(self, request: HttpRequest) -> tuple[User | None, dict[str, JsonValue] | None]:
         """Return the user, plus the session claims if they came from the cookie.

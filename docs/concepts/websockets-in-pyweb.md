@@ -140,6 +140,17 @@ connection is closed, and the handler never runs. This is how login
 checks protect WebSockets too: the same middleware guards the letters
 and the phone calls.
 
+One thing is different for phone calls: a WebSocket handshake cannot
+carry a [CSRF token](csrf.md), but the browser still adds your cookie,
+even when a page from *another* site dials. So the phone line checks
+which house the call comes from. When the caller is logged in by
+cookie, `SessionAuth` only puts them through if the handshake's `Origin`
+header matches the site's own `Host` (or an origin you listed in
+`allowed_origins`); otherwise the answer is `403`. Your own
+`members_only`-style middleware does not do this for you -- if it
+trusts cookies, check `request.headers.get("Origin")` too. See
+[CSRF Protection](csrf.md#websockets-which-house-is-calling).
+
 Some other rules on the line:
 
 - A handshake that is broken (for example no `Sec-WebSocket-Key`) gets

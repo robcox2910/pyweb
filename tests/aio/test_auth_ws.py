@@ -18,6 +18,7 @@ SWITCHING = 101
 UNAUTHORIZED = 401
 FORBIDDEN = 403
 KEY = "dGhlIHNhbXBsZSBub25jZQ=="
+SAME_ORIGIN = f"Origin: http://{HOST}\r\n"
 
 
 def plain_request(user: object | None = None, *, accept: str = "") -> HttpRequest:
@@ -103,12 +104,12 @@ class TestRequireDecorator:
         assert caught.value.status == UNAUTHORIZED
 
 
-def ws_app() -> tuple[App, SessionAuth, InMemoryUsers]:
+def ws_app(allowed_origins: tuple[str, ...] = ()) -> tuple[App, SessionAuth, InMemoryUsers]:
     """Build an app whose WebSocket route needs the admin role."""
     users = InMemoryUsers()
     users.add("ada", ADA_WORD, roles=("admin",), rounds=ROUNDS)
     users.add("bob", BOB_WORD, rounds=ROUNDS)
-    auth = SessionAuth(SessionSigner(DEMO_KEY), users)
+    auth = SessionAuth(SessionSigner(DEMO_KEY), users, allowed_origins=allowed_origins)
     app = App()
     app.middleware(auth)
 
@@ -148,6 +149,15 @@ async def greeted(server: AsyncServer, raw: bytes) -> tuple[Reply, bytes]:
     return reply, greeting
 
 
+async def status_of(server: AsyncServer, raw: bytes) -> int:
+    """Send an upgrade request and return just the reply's status."""
+    reader, writer = await connect(server)
+    await send(writer, raw)
+    reply = await read_reply(reader)
+    writer.close()
+    return reply.status
+
+
 class TestWebSocketAuth:
     """Test that the auth middleware guards WebSocket upgrades."""
 
@@ -167,7 +177,8 @@ class TestWebSocketAuth:
     def test_authenticated_upgrade_succeeds(self) -> None:
         """Upgrade a cookie-authenticated admin and run the handler."""
         app, auth, users = ws_app()
-        reply, rest = serve(app, lambda s: greeted(s, handshake(cookie_for(auth, users, "ada"))))
+        line = cookie_for(auth, users, "ada") + SAME_ORIGIN
+        reply, rest = serve(app, lambda s: greeted(s, handshake(line)))
         assert reply.status == SWITCHING
         assert b"hi ada in lobby" in rest
 
@@ -180,6 +191,75 @@ class TestWebSocketAuth:
         reply, rest = serve(app, lambda s: greeted(s, handshake(line)))
         assert reply.status == SWITCHING
         assert b"hi ada in lobby" in rest
+
+
+class TestWebSocketOrigin:
+    """Test that a cookie upgrade must come from our own site (no hijacking).
+
+    The phone line checks which house the call comes from: a page on
+    another site (even another port on the same machine) cannot use the
+    visitor's cookie to open a WebSocket in their name.
+    """
+
+    def upgrade(self, extra: str, allowed: tuple[str, ...] = ()) -> int:
+        """Send Ada's cookie upgrade with extra header lines; return the status."""
+        app, auth, users = ws_app(allowed)
+        raw = handshake(cookie_for(auth, users, "ada") + extra)
+        return serve(app, lambda s: status_of(s, raw))
+
+    def test_same_origin_is_101(self) -> None:
+        """Put through a cookie upgrade whose Origin matches the Host."""
+        assert self.upgrade(SAME_ORIGIN) == SWITCHING
+
+    def test_cross_origin_is_403(self) -> None:
+        """Refuse a cookie upgrade from another port on the same machine."""
+        assert self.upgrade(f"Origin: http://{HOST}:9999\r\n") == FORBIDDEN
+
+    def test_null_origin_is_403(self) -> None:
+        """Refuse a cookie upgrade from a sandboxed page (Origin: null)."""
+        assert self.upgrade("Origin: null\r\n") == FORBIDDEN
+
+    def test_missing_origin_is_403(self) -> None:
+        """Refuse a cookie upgrade with no Origin (browsers always send one)."""
+        assert self.upgrade("") == FORBIDDEN
+
+    def test_allow_listed_origin_is_101(self) -> None:
+        """Put through an Origin named in ``allowed_origins``."""
+        app, auth, users = ws_app(("http://localhost:3000",))
+        raw = handshake(cookie_for(auth, users, "ada") + "Origin: http://localhost:3000\r\n")
+        reply, rest = serve(app, lambda s: greeted(s, raw))
+        assert reply.status == SWITCHING
+        assert b"hi ada in lobby" in rest
+
+    def test_bearer_without_origin_is_101(self) -> None:
+        """Leave bearer-token upgrades alone: a script sends no Origin."""
+        app, auth, users = ws_app()
+        ada = users.get("ada")
+        assert ada is not None
+        line = f"Authorization: Bearer {auth.api_token(ada)}\r\n"
+        reply, _ = serve(app, lambda s: greeted(s, handshake(line)))
+        assert reply.status == SWITCHING
+
+    def test_cookie_on_open_route_is_checked_too(self) -> None:
+        """Refuse a cross-site cookie upgrade even to a route with no require."""
+        app = App()
+        users = InMemoryUsers()
+        ada = users.add("ada", ADA_WORD, rounds=ROUNDS)
+        auth = SessionAuth(SessionSigner(DEMO_KEY), users)
+        app.middleware(auth)
+
+        @app.websocket("/live/<room>")
+        async def live(ws: WebSocket, _request: HttpRequest, room: str) -> None:  # pyright: ignore[reportUnusedFunction]
+            """Greet anyone."""
+            await ws.send_text(f"hi in {room}")
+
+        anonymous, _ = serve(app, lambda s: greeted(s, handshake()))
+        response = HttpResponse()
+        auth.login(response, ada)
+        cookie = (response.headers.get("Set-Cookie") or "").split(";")[0]
+        raw = handshake(f"Cookie: {cookie}\r\nOrigin: http://evil.example\r\n")
+        assert anonymous.status == SWITCHING
+        assert serve(app, lambda s: status_of(s, raw)) == FORBIDDEN
 
 
 class SlotCallable:
