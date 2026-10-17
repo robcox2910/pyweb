@@ -140,7 +140,18 @@ class SessionSigner:
         self._clock = clock
 
     def sign(self, data: Mapping[str, JsonValue]) -> str:
-        """Return ``payload.signature`` for the data, stamped with the time."""
+        """Sign the data, stamped with the time it was issued.
+
+        Args:
+            data: Small JSON-friendly facts to protect, such as the user's
+                name. They are readable by anyone holding the token (signed,
+                not secret), so never put a password in them.
+
+        Returns:
+            A ``payload.signature`` token: base64url JSON (with an ``iat``
+            timestamp added) plus its HMAC signature.
+
+        """
         body = json.dumps({**data, "iat": self._clock()}, separators=(",", ":"))
         payload = _b64_encode(body.encode("utf-8"))
         return f"{payload}.{hmac_sign(payload, self._secret)}"
@@ -161,7 +172,19 @@ class SessionSigner:
         return data if isinstance(data, dict) else None
 
     def unsign(self, token: str) -> dict[str, JsonValue] | None:
-        """Return the signed data, or None if the token is not trustworthy."""
+        """Check a token and give back the data it carries.
+
+        Never raises: anything odd simply answers ``None``.
+
+        Args:
+            token: A string made by :meth:`sign`, for example from a cookie.
+
+        Returns:
+            The signed data (including ``iat``), or ``None`` if the token is
+            too long, malformed, signed with another secret, tampered with,
+            older than ``max_age`` or stamped too far in the future.
+
+        """
         data = self._verified_payload(token)
         if data is None:
             return None

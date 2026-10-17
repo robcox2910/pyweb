@@ -34,6 +34,14 @@ cannot `await` -- `time.sleep`, reading a huge file, a slow database
 library -- mark it `blocking=True`, so it runs on a helper thread
 using `pynet.loop.run_in_thread`.
 
+There are only **four helpers** in the back kitchen (PyNet's thread
+pool), and they are shared: the same four also read files for
+`mount_static`. A fifth slow job has to queue until a helper is free. So
+if many visitors hit slow `blocking=True` handlers at once, *everyone*
+who needs a helper waits -- even someone just asking for a picture.
+Keep blocking jobs as short as you can, and prefer `async def` with
+`await` where a library lets you.
+
 `blocking=True` only works on a plain `def`. Putting it on an
 `async def` is an error (`ValueError`), because an async handler should
 `await` instead of blocking.
