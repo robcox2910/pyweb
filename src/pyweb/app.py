@@ -25,17 +25,20 @@ from typing import Protocol, cast
 
 from pynet.loop import run_in_thread
 
+from pyweb._handlers import (
+    MethodNotAllowedError,
+    UpgradeRequiredError,
+    coerce,
+    server_error,
+    without_body,
+)
 from pyweb.http1 import KNOWN_METHODS
 from pyweb.messages import (
     Headers,
     HTTPError,
     HttpRequest,
     HttpResponse,
-    JsonValue,
     Outcome,
-    StreamingResponse,
-    html,
-    json,
 )
 from pyweb.routing import WEBSOCKET, RouteTable
 
@@ -64,13 +67,7 @@ type Hook = Callable[[], object]
 """A startup or shutdown hook: a plain or async function with no arguments."""
 
 _NOT_FOUND = 404
-_METHOD_NOT_ALLOWED = 405
-_SERVER_ERROR = 500
 _SWITCHING_PROTOCOLS = 101
-_UPGRADE_REQUIRED = 426
-_ERROR_PAGE = (
-    "<!doctype html><title>500 Internal Server Error</title><h1>500 Internal Server Error</h1>"
-)
 
 
 class _Decorator(Protocol):
@@ -121,40 +118,6 @@ def wants_websocket(request: HttpRequest) -> bool:
     """Return whether the request is a GET asking to become a WebSocket."""
     tokens = (request.headers.get("Upgrade") or "").lower().split(",")
     return request.method == "GET" and "websocket" in (token.strip() for token in tokens)
-
-
-def _server_error(request: HttpRequest) -> HttpResponse:
-    """Build the generic 500 answer, with no details for the client."""
-    if request.wants_html:
-        return html(_ERROR_PAGE, _SERVER_ERROR)
-    return json({"error": "Internal Server Error"}, _SERVER_ERROR)
-
-
-def _coerce(result: object, request: HttpRequest) -> Outcome:
-    """Turn a handler's return value into a response."""
-    if isinstance(result, HttpResponse | StreamingResponse):
-        return result
-    if isinstance(result, dict | list):
-        return json(cast("JsonValue", result))
-    if isinstance(result, str):
-        return html(result)
-    logger.error(
-        "Handler for %s %s returned unsupported type %s",
-        request.method,
-        request.path,
-        type(result).__name__,
-    )
-    return _server_error(request)
-
-
-def _without_body(response: HttpResponse) -> HttpResponse:
-    """Copy a response for HEAD: same headers plus the GET length, no body.
-
-    The handler's own object is left alone, in case it is shared.
-    """
-    headers = Headers(response.headers.items())
-    headers.set("Content-Length", str(len(response.body)))
-    return HttpResponse(response.status, headers)
 
 
 def _link(middleware: Middleware, call_next: CallNext) -> CallNext:
@@ -309,9 +272,9 @@ class App:
             outcome = exc.to_response(request)
         except Exception:
             logger.exception("Unhandled error in %s %s", request.method, request.path)
-            outcome = _server_error(request)
+            outcome = server_error(request)
         if request.method == "HEAD" and isinstance(outcome, HttpResponse) and outcome.body:
-            outcome = _without_body(outcome)
+            outcome = without_body(outcome)
         return outcome
 
     async def _dispatch(self, request: HttpRequest) -> Outcome:
@@ -322,12 +285,12 @@ class App:
         try:
             route, params = self._find(request)
             request.path_params = params
-            return _coerce(await self._call(route, request, params), request)
+            return coerce(await self._call(route, request, params), request)
         except HTTPError as exc:
             return exc.to_response(request)
         except Exception:
             logger.exception("Unhandled error in %s %s", request.method, request.path)
-            return _server_error(request)
+            return server_error(request)
 
     def _upgrade_for(self, request: HttpRequest) -> WebSocketUpgrade | None:
         """Return the upgrade marker if this request asks for a WebSocket route."""
@@ -348,9 +311,9 @@ class App:
         allowed = sorted(found.allowed - {WEBSOCKET})
         if not allowed:
             if WEBSOCKET in found.allowed and request.method in {"GET", "HEAD"}:
-                raise _UpgradeRequiredError
+                raise UpgradeRequiredError
             raise HTTPError(_NOT_FOUND)
-        raise _MethodNotAllowedError(allowed)
+        raise MethodNotAllowedError(allowed)
 
     @staticmethod
     async def _call(route: _Route, request: HttpRequest, params: dict[str, object]) -> object:
@@ -365,32 +328,3 @@ class App:
             # decorator wrapping an async handler. Await it for them.
             return await result
         return result
-
-
-class _MethodNotAllowedError(HTTPError):
-    """A 405 that remembers which methods would have worked."""
-
-    def __init__(self, allowed: list[str]) -> None:
-        """Store the allowed methods."""
-        super().__init__(_METHOD_NOT_ALLOWED)
-        self.allowed = allowed
-
-    def to_response(self, request: HttpRequest) -> HttpResponse:
-        """Render the 405 with an ``Allow`` header."""
-        response = super().to_response(request)
-        response.headers.set("Allow", ", ".join(self.allowed))
-        return response
-
-
-class _UpgradeRequiredError(HTTPError):
-    """A 426: this path only speaks WebSocket."""
-
-    def __init__(self) -> None:
-        """Set the status."""
-        super().__init__(_UPGRADE_REQUIRED)
-
-    def to_response(self, request: HttpRequest) -> HttpResponse:
-        """Render the 426 with the ``Upgrade`` header saying what to ask for."""
-        response = super().to_response(request)
-        response.headers.set("Upgrade", "websocket")
-        return response
