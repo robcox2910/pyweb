@@ -85,3 +85,7 @@ request.body         # ""
 
 The server has read the letter. Now it needs to write a reply!
 Head to [Responses](responses.md).
+
+## See also
+
+- [PyNet: HTTP client](https://robcox2910.github.io/pynet/concepts/http-client/) -- the other side of the conversation: how to *send* a request instead of reading one.
