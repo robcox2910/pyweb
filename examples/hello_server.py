@@ -68,9 +68,9 @@ def api_info(_request: Request) -> Response:
 
 if __name__ == "__main__":
     server = Server(router)
-    print(f"PyWeb serving on http://{server.host}:{server.port}")  # noqa: T201
-    print("Press Ctrl+C to stop.")  # noqa: T201
+    print(f"PyWeb serving on http://{server.host}:{server.port}")
+    print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nServer stopped.")  # noqa: T201
+        print("\nServer stopped.")

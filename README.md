@@ -69,6 +69,63 @@ Every concept is explained with real-world analogies:
 | Templates | [templates.md](docs/concepts/templates.md) | Form letters with blanks |
 | Server | [server.md](docs/concepts/server.md) | The post office |
 
+## Async PyWeb
+
+PyWeb also has an async framework that runs on [PyNet](https://github.com/robcox2910/pynet)'s
+own event loop: one shopkeeper serving many customers at once, with
+server-sent events, WebSockets, sessions and roles.
+
+```python
+from pynet.loop import run
+from pynet.streams import open_connection
+
+from pyweb.app import App
+from pyweb.aserver import AsyncServer
+
+app = App()
+
+
+@app.get("/hello/<name>")
+async def hello(request, name):
+    return {"greeting": f"Hello, {name}!"}
+
+
+async def main():
+    async with AsyncServer(app, access_log=False) as server:
+        reader, writer = await open_connection("127.0.0.1", server.port)
+        writer.write(b"GET /hello/Sam HTTP/1.1\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        print((await reader.read()).split(b"\r\n\r\n")[1].decode())
+        writer.close()
+
+
+run(main())
+```
+
+Output: `{"greeting": "Hello, Sam!"}`
+
+Run the live demo (a page, a clock that ticks every second, and a
+WebSocket echo) and visit http://127.0.0.1:8000, then press Ctrl-C to stop:
+
+```bash
+uv run pyweb --async
+```
+
+More programs live in `examples/`: `async_hello.py`, `sse_clock.py`,
+`ws_echo_page.py` and `login_demo.py`. The step-by-step lessons start at
+"Part 2: A Busy Restaurant" in [docs/index.md](docs/index.md).
+
+### Developing alongside a sibling
+
+PyWeb uses PyNet and PyCrypt from pinned git tags. To work on a sibling
+checkout at the same time, install it editable and tell `uv` not to
+re-sync over it:
+
+```bash
+uv pip install -e ../pynet
+uv run --no-sync pytest
+```
+
 ## Releasing
 
 Other projects in the series ([PyStack](https://github.com/robcox2910/pystack)) use a pinned release of this one,
