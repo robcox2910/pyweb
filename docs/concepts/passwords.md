@@ -67,3 +67,5 @@ of 100 000.)
 
 Logged-in visitors need to be remembered. See
 [Cookies and Sessions](cookies-and-sessions.md).
+
+Once visitors can log in, decide where they may go: see [Roles](roles.md).
