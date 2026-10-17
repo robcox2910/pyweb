@@ -183,3 +183,7 @@ the goodbye and keeps going is cancelled when the `grace` period ends.
   cancelled after `grace`.
 - A plain `GET` gets `426` with `Upgrade: websocket`; a broken handshake
   gets `400`; the access log shows the call as `101`.
+
+## See also
+
+- [PyNet: real WebSockets](https://robcox2910.github.io/pynet/concepts/websocket-real/) -- the phone-line machinery that PyWeb borrows for its live calls.

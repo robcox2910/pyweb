@@ -148,3 +148,7 @@ headers and throws the body away.
 ## Next Up
 
 Want to do something for *every* request? See [Middleware](middleware.md).
+
+## See also
+
+- [PyNet: the event loop](https://robcox2910.github.io/pynet/concepts/event-loop/) -- the loop PyWeb runs on, built from scratch.
