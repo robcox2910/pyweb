@@ -204,6 +204,22 @@ class TestRoundTrip:
         assert reply.headers["connection"] == "close"
         assert rest == b""
 
+    def test_handler_connection_close_closes_after_the_response(self) -> None:
+        """Close after the response when the handler sets ``Connection: close``."""
+        app = App()
+
+        @app.get("/bye")
+        def bye(_request: HttpRequest) -> HttpResponse:  # pyright: ignore[reportUnusedFunction]
+            """Answer and ask for the connection to close."""
+            response = text("bye")
+            response.headers.set("Connection", "Close")
+            return response
+
+        reply, rest = serve(app, lambda s: exchange(s, b"GET /bye HTTP/1.1\r\n\r\n" + GET_HELLO))
+        assert reply.body == b"bye"
+        assert reply.headers["connection"] == "close"
+        assert rest == b""
+
     def test_http10_closes_by_default(self) -> None:
         """Close an HTTP/1.0 connection unless it asks for keep-alive."""
         reply, rest = serve(hello_app(), lambda s: exchange(s, b"GET /hello HTTP/1.0\r\n\r\n"))
@@ -482,8 +498,8 @@ class TestErrors:
         assert rest == b""
         assert any("could not be sent" in r.getMessage() for r in caplog.records)
 
-    def test_streaming_outcome_is_500_until_supported(self) -> None:
-        """Answer 500 for a stream while the stream writer is not built yet."""
+    def test_unknown_streaming_outcome_is_500(self) -> None:
+        """Answer 500 for a kind of stream the server does not know how to write."""
         app = App()
 
         class Stream:
@@ -651,6 +667,28 @@ class TestLifecycle:
             assert calls == ["startup", "shutdown"]
             with pytest.raises(NetConnectionError):
                 await open_connection(HOST, port)
+
+        run(main())
+
+    def test_close_twice_after_a_failing_shutdown_returns(self) -> None:
+        """Let a second close return promptly even if the first one's shutdown raised."""
+
+        class BrokenApp(App):
+            """An app whose shutdown raises."""
+
+            async def shutdown(self) -> None:
+                """Fail on purpose."""
+                msg = "shutdown broke"
+                raise RuntimeError(msg)
+
+        async def main() -> None:
+            """Close twice; the second must not wait forever."""
+            server = AsyncServer(BrokenApp())
+            await server.start(HOST, 0)
+            with pytest.raises(RuntimeError, match="shutdown broke"):
+                await server.close()
+            async with timeout(SHORT):
+                await server.close()
 
         run(main())
 

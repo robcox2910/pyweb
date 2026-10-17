@@ -21,6 +21,7 @@ from pynet.errors import ConnectionClosedError
 from pynet.loop import Cancelled, Task, current_task, get_running_loop, timeout
 from pynet.streams import IncompleteReadError, LimitOverrunError, StreamReader, StreamWriter
 
+from pyweb._streaming import EventPump
 from pyweb.app import App, Handler
 from pyweb.http1 import (
     STATUS_REASONS,
@@ -42,6 +43,7 @@ from pyweb.messages import (
     QueryParams,
     StreamingResponse,
 )
+from pyweb.sse import EventStream
 
 logger = logging.getLogger("pyweb.server")
 access_logger = logging.getLogger("pyweb.access")
@@ -114,6 +116,13 @@ class Connection:
         self._task: Task[object] | None = current_task()
         self.idle = False
         self.closing = False
+        self._pump: EventPump | None = None
+
+    def begin_close(self) -> None:
+        """Finish the current request (ending any open stream), then close."""
+        self.closing = True
+        if self._pump is not None:
+            self._pump.stop()
 
     def cancel(self) -> None:
         """Cut the connection off (used when the grace period runs out)."""
@@ -171,10 +180,15 @@ class Connection:
             logger.exception("App failed on %s %s", head.method, _log_path(head))
             outcome = _error(_SERVER_ERROR, head)
         # Decided after the handler: the server may have begun closing meanwhile.
-        keep = wants_keep_alive(head) and not self.closing
-        if isinstance(outcome, HttpResponse) or head.method == "HEAD":
+        keep = wants_keep_alive(head) and not self.closing and not _asks_to_close(outcome)
+        if isinstance(outcome, HttpResponse):
             return await self._send(outcome, head, started, keep=keep)
-        return await self._fallback(self._write_stream(request, outcome, keep=keep), head, started)
+        if head.method == "HEAD":
+            try:
+                return await self._send(outcome, head, started, keep=keep)
+            finally:
+                await _close_stream(outcome)
+        return await self._fallback(self._write_stream(outcome, head, started), head, started)
 
     async def _wait_for_request(self, *, first: bool) -> bytes:
         """Wait for the first byte of a request; ``b""`` means close quietly.
@@ -230,13 +244,21 @@ class Connection:
     # -- writing ------------------------------------------------------------
 
     def _head_bytes(
-        self, outcome: Outcome, head: RequestHead | None, *, keep: bool, length: str | None
+        self,
+        outcome: Outcome,
+        head: RequestHead | None,
+        *,
+        keep: bool,
+        length: str | None,
+        chunked: bool = False,
     ) -> bytes:
         """Encode the status line and headers, adding the server's own headers."""
         items = [(k, v) for k, v in outcome.headers.items() if k.lower() not in _SERVER_OWNED]
         items += [("Date", _http_date()), ("Server", "PyWeb")]
         if length is not None and outcome.status not in _NO_BODY_STATUSES:
             items.append(("Content-Length", length))
+        if chunked:
+            items.append(("Transfer-Encoding", "chunked"))
         if not keep:
             items.append(("Connection", "close"))
         elif head is not None and head.version == "HTTP/1.0":
@@ -284,6 +306,11 @@ class Connection:
         except TimeoutError:
             self._writer.abort()  # the client stopped reading
             return False
+        self._log(head, status, body_bytes, started)
+        return keep
+
+    def _log(self, head: RequestHead | None, status: int, body_bytes: int, started: float) -> None:
+        """Write one access-log line, if access logging is on."""
         if self._access_log:
             access_logger.info(
                 "%s %s %d %d %.1fms",
@@ -293,7 +320,6 @@ class Connection:
                 body_bytes,
                 (self._loop.time() - started) * 1000,
             )
-        return keep
 
     async def _fallback(self, hook: Awaitable[bool], head: RequestHead, started: float) -> bool:
         """Await a stream/upgrade hook; answer 500 and close if it is not built yet."""
@@ -306,12 +332,33 @@ class Connection:
     # -- hooks filled in by later tasks ------------------------------------
 
     async def _write_stream(
-        self, request: HttpRequest, outcome: StreamingResponse, *, keep: bool
+        self, outcome: StreamingResponse, head: RequestHead, started: float
     ) -> bool:
-        """Send a streaming response; return whether to keep the connection."""
-        del request, outcome, keep  # used once streaming is built
-        msg = "streaming responses are not supported yet"
-        raise NotImplementedError(msg)
+        """Send an ``EventStream`` until it ends; the connection is never reused after.
+
+        Raises:
+            NotImplementedError: For a kind of stream the server cannot write.
+
+        """
+        if not isinstance(outcome, EventStream):
+            msg = f"cannot stream a {type(outcome).__name__}"
+            raise NotImplementedError(msg)
+        try:
+            data = self._head_bytes(outcome, head, keep=False, length=None, chunked=True)
+        except ValueError:
+            await outcome.aclose()
+            logger.exception("Stream for %s could not be sent; answering 500", _log_path(head))
+            return await self._send(_error(_SERVER_ERROR, head), head, started, keep=False)
+        pump = EventPump(outcome, self._reader, self._writer, self._limits.write_timeout)
+        self._pump = pump
+        if self.closing:
+            pump.stop()
+        try:
+            await pump.run(data)
+        finally:
+            self._pump = None
+        self._log(head, outcome.status, pump.body_bytes, started)
+        return False
 
     async def _upgrade(
         self, request: HttpRequest, handler: Handler, params: dict[str, object]
@@ -320,6 +367,18 @@ class Connection:
         del request, handler, params  # used once WebSockets are built
         msg = "WebSocket upgrades are not supported yet"
         raise NotImplementedError(msg)
+
+
+def _asks_to_close(outcome: Outcome) -> bool:
+    """Return whether the handler set ``Connection: close`` on its answer."""
+    tokens = (outcome.headers.get("Connection") or "").lower().split(",")
+    return "close" in (token.strip() for token in tokens)
+
+
+async def _close_stream(outcome: StreamingResponse) -> None:
+    """Close a stream that will never be sent, so its source can clean up."""
+    if isinstance(outcome, EventStream):
+        await outcome.aclose()
 
 
 def _http_date() -> str:

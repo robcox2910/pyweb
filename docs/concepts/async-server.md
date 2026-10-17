@@ -139,8 +139,9 @@ off with `AsyncServer(app, access_log=False)`.
 - A response header with a newline becomes a `500`, never two replies.
 - With `max_connections=2`, a third connection gets `503` and is closed.
 - `close(grace=...)` lets an in-flight request finish, cuts off one that
-  runs too long, closes idle connections at once, and runs the startup
-  and shutdown hooks.
+  runs too long, closes idle connections at once, ends open event
+  streams, and runs the startup and shutdown hooks. Closing twice is
+  safe, even when the first close's shutdown raised.
 - The access log line has the right shape and never includes the query.
 
 ## Next Up

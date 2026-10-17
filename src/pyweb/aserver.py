@@ -113,9 +113,10 @@ class AsyncServer:
     async def close(self, grace: float = DEFAULT_GRACE) -> None:
         """Stop accepting, let in-flight requests finish, then shut the app down.
 
-        Idle keep-alive connections are closed at once. Requests still
-        running after ``grace`` seconds are cancelled. Closing twice is
-        harmless; the second call waits for the first to finish.
+        Idle keep-alive connections are closed at once and open event
+        streams are ended. Requests still running after ``grace`` seconds
+        are cancelled. Closing twice is harmless; the second call waits
+        for the first to finish (even if the first one raised).
         """
         if self._server is None:
             return
@@ -123,10 +124,17 @@ class AsyncServer:
             await self._closed.wait()
             return
         self._closing = True
-        self._server.close()
-        await self._server.wait_closed()
+        try:
+            await self._close(self._server, grace)
+        finally:
+            self._closed.set()  # even if a hook raised, a second close must not hang
+
+    async def _close(self, server: Server, grace: float) -> None:
+        """Stop listening, drain or cancel the connections, then run the shutdown hooks."""
+        server.close()
+        await server.wait_closed()
         for connection in list(self._connections):
-            connection.closing = True
+            connection.begin_close()
             if connection.idle:
                 connection.cancel()
         try:
@@ -137,7 +145,6 @@ class AsyncServer:
                 connection.cancel()
             await self._drained.wait()
         await self._app.shutdown()
-        self._closed.set()
 
     async def __aenter__(self) -> Self:
         """Start (on a free port, if not already started) and return the server."""

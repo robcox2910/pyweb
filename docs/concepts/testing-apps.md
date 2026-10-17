@@ -89,6 +89,12 @@ from `client=("testclient", 0)` and carries `Host: testserver`.
 The answer is a `TestResponse` with `status`, `headers`, `body`, a
 `text` property and a `json()` method.
 
+For a route that answers with an `EventStream` (see
+[Server-Sent Events](server-sent-events.md)), `await
+client.stream("/news", count=3)` returns the first three `ServerEvent`s
+and then closes the stream's source, just as the server does when a
+browser leaves.
+
 Remember that the client's methods are `async`: run your test inside
 `pynet.loop.run(...)`.
 
@@ -101,3 +107,4 @@ Remember that the client's methods are `async`: run your test inside
 - `HEAD` returns an empty body.
 - The cookie jar stores cookies from `Set-Cookie`, sends them back, and
   forgets cookies deleted with `Max-Age=0`.
+- `stream` takes the first `count` events, then closes the source.

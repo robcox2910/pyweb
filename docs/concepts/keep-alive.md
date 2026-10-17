@@ -82,7 +82,8 @@ begins.
 ## The Rules
 
 - **HTTP/1.1** keeps the connection open unless the request says
-  `Connection: close`.
+  `Connection: close` (or the handler sets `Connection: close` on its
+  response).
 - **HTTP/1.0** closes after one reply unless the request says
   `Connection: keep-alive` (and then the reply says it too).
 - After an **error about the request itself** (a bad head, a body that
@@ -101,6 +102,8 @@ A client may even send two requests at once without waiting
 - Two requests on one HTTP/1.1 connection both get answers.
 - Two requests sent in one packet are answered in order.
 - `Connection: close` is honoured: the reply says so and the socket closes.
+- A handler that sets `Connection: close` gets the connection closed
+  after its reply.
 - HTTP/1.0 closes by default and stays open with `Connection: keep-alive`.
 - A `404` does not close the connection; the next request still works.
 - An idle keep-alive connection closes after `keepalive_timeout` without

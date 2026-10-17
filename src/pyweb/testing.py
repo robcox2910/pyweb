@@ -16,7 +16,8 @@ from urllib.parse import quote, urlencode
 
 from pyweb.app import App
 from pyweb.http1 import split_target
-from pyweb.messages import Headers, HttpRequest, HttpResponse, JsonValue, QueryParams
+from pyweb.messages import Headers, HttpRequest, HttpResponse, JsonValue, Outcome, QueryParams
+from pyweb.sse import EventStream, ServerEvent
 
 __all__ = ["RequestOptions", "TestClient", "TestResponse"]
 
@@ -81,6 +82,40 @@ class TestClient:
     app: App
     cookies: dict[str, str] = field(default_factory=dict[str, str])
 
+    async def _handle(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: Mapping[str, str] | None = None,
+        json: JsonValue | None = None,
+        form: Mapping[str, str] | None = None,
+        body: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> Outcome:
+        """Build a request exactly as the server would and return the app's answer."""
+        content, content_type = _encode_body(json, form, body)
+        target = quote(path, safe=_SAFE_PATH_CHARS)
+        if query:
+            target += ("&" if "?" in target else "?") + urlencode(dict(query))
+        decoded_path, pairs = split_target(target)
+        request_headers = Headers([("Host", _HOST)])
+        if content_type is not None:
+            request_headers.set("Content-Type", content_type)
+        if content:
+            request_headers.set("Content-Length", str(len(content)))
+        if self.cookies:
+            jar = "; ".join(f"{name}={value}" for name, value in self.cookies.items())
+            request_headers.set("Cookie", jar)
+        for name, value in (headers or {}).items():
+            request_headers.set(name, value)
+        request = HttpRequest(
+            method, decoded_path, QueryParams(pairs), request_headers, content, _CLIENT
+        )
+        outcome = await self.app.handle(request)
+        self._store_cookies(outcome.headers)
+        return outcome
+
     async def request(
         self,
         method: str,
@@ -109,29 +144,38 @@ class TestClient:
                 is given.
 
         """
-        content, content_type = _encode_body(json, form, body)
-        target = quote(path, safe=_SAFE_PATH_CHARS)
-        if query:
-            target += ("&" if "?" in target else "?") + urlencode(dict(query))
-        decoded_path, pairs = split_target(target)
-        request_headers = Headers([("Host", _HOST)])
-        if content_type is not None:
-            request_headers.set("Content-Type", content_type)
-        if content:
-            request_headers.set("Content-Length", str(len(content)))
-        if self.cookies:
-            jar = "; ".join(f"{name}={value}" for name, value in self.cookies.items())
-            request_headers.set("Cookie", jar)
-        for name, value in (headers or {}).items():
-            request_headers.set(name, value)
-        request = HttpRequest(
-            method, decoded_path, QueryParams(pairs), request_headers, content, _CLIENT
+        outcome = await self._handle(
+            method, path, query=query, json=json, form=form, body=body, headers=headers
         )
-        outcome = await self.app.handle(request)
-        self._store_cookies(outcome.headers)
-        # A streaming body is not read here; only its status and headers are kept.
+        # A streaming body is not read here (see ``stream``); only its status and headers.
         data = outcome.body if isinstance(outcome, HttpResponse) else b""
         return TestResponse(outcome.status, outcome.headers, data)
+
+    async def stream(
+        self, path: str, *, count: int, headers: Mapping[str, str] | None = None
+    ) -> list[ServerEvent]:
+        """GET an ``EventStream`` route and collect its first ``count`` events.
+
+        The stream's source is closed afterwards, just as the server does
+        when a browser leaves. Fewer events come back if the source ends early.
+
+        Raises:
+            TypeError: If the route does not answer with an ``EventStream``.
+
+        """
+        outcome = await self._handle("GET", path, headers=headers)
+        if not isinstance(outcome, EventStream):
+            msg = f"GET {path} answered {outcome.status}, not an EventStream"
+            raise TypeError(msg)
+        events: list[ServerEvent] = []
+        try:
+            async for event in outcome.source:
+                events.append(event)
+                if len(events) >= count:
+                    break
+        finally:
+            await outcome.aclose()
+        return events
 
     def _store_cookies(self, headers: Headers) -> None:
         """Update the jar from Set-Cookie headers, forgetting ``Max-Age=0`` ones."""
