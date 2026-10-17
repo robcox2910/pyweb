@@ -29,11 +29,21 @@ __all__ = [
 _SCHEME = "pbkdf2_sha256"
 _HASH_PARTS = 4
 _SALT_BYTES = 16
+_KEY_BYTES = 32
 _MAX_ROUNDS = 10_000_000
 _MIN_SECRET_LENGTH = 32
 _MAX_TOKEN_LENGTH = 4096
 _FUTURE_SKEW = 60.0
 _CSRF_BYTES = 32
+
+
+def _encodable(text: str) -> bool:
+    """Return True if the text can be encoded as UTF-8 (no lone surrogates)."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def hash_password(password: str, *, rounds: int = 100_000) -> str:
@@ -53,6 +63,9 @@ def hash_password(password: str, *, rounds: int = 100_000) -> str:
     if rounds < 1:
         msg = "rounds must be at least 1"
         raise ValueError(msg)
+    if not _encodable(password):
+        msg = "password must be encodable as UTF-8"
+        raise ValueError(msg)
     key, salt = derive_key(password, salt=secrets.token_bytes(_SALT_BYTES), rounds=rounds)
     return f"{_SCHEME}${rounds}${salt.hex()}${key.hex()}"
 
@@ -68,6 +81,8 @@ def verify_password(password: str, stored: str) -> bool:
         True only if the stored string is well formed and matches.
 
     """
+    if not _encodable(password):
+        return False
     parts = stored.split("$")
     if len(parts) != _HASH_PARTS or parts[0] != _SCHEME:
         return False
@@ -78,7 +93,7 @@ def verify_password(password: str, stored: str) -> bool:
         expected = bytes.fromhex(key_hex)
     except ValueError:
         return False
-    if not salt or not expected or not 1 <= rounds <= _MAX_ROUNDS:
+    if not salt or len(expected) != _KEY_BYTES or not 1 <= rounds <= _MAX_ROUNDS:
         return False
     actual, _ = derive_key(password, salt=salt, key_length=len(expected), rounds=rounds)
     return hmac.compare_digest(actual, expected)

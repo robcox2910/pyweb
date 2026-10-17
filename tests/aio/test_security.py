@@ -94,6 +94,18 @@ class TestPasswords:
         """Return False, never raise, for malformed stored strings."""
         assert verify_password(GOOD_WORD, stored) is False
 
+    def test_unencodable_password(self) -> None:
+        """Refuse a lone surrogate when hashing; return False when verifying."""
+        stored = hash_password(GOOD_WORD, rounds=ROUNDS)
+        assert verify_password("\ud800", stored) is False
+        with pytest.raises(ValueError, match="UTF-8"):
+            hash_password("\ud800", rounds=ROUNDS)
+
+    def test_wrong_key_length_is_false(self) -> None:
+        """Reject a stored key that is not 32 bytes long."""
+        stored = f"pbkdf2_sha256${ROUNDS}${'ab' * 16}${'cd' * 64}"
+        assert verify_password(GOOD_WORD, stored) is False
+
     def test_bad_rounds_rejected_on_hash(self) -> None:
         """Refuse to hash with fewer than one round."""
         with pytest.raises(ValueError, match="rounds"):
@@ -130,6 +142,13 @@ class TestSessionSigner:
         flipped = "A" if text[0] != "A" else "B"
         pieces[part] = flipped + text[1:]
         assert signer.unsign(".".join(pieces)) is None
+
+    def test_last_payload_character_changed_is_none(self) -> None:
+        """Reject a token whose final payload character was changed."""
+        signer = SessionSigner(DEMO_KEY, clock=Clock())
+        payload, stamp = signer.sign({"user": "ada"}).split(".")
+        flipped = "A" if payload[-1] != "A" else "B"
+        assert signer.unsign(f"{payload[:-1]}{flipped}.{stamp}") is None
 
     def test_other_secret_is_none(self) -> None:
         """Reject a token signed with a different secret."""
