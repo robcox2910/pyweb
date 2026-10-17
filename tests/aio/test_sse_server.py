@@ -275,6 +275,45 @@ class TestStreaming:
         assert chunks == [b"data: ok\n\n", b""]
         assert any("event source" in r.getMessage() for r in caplog.records)
 
+    def test_unencodable_event_is_logged_and_the_stream_ends(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Log an event that cannot be encoded, then end the stream cleanly."""
+        closed: list[bool] = []
+        app = App()
+
+        @app.get("/events")
+        def events(_request: HttpRequest) -> EventStream:  # pyright: ignore[reportUnusedFunction]
+            """Yield a good event, then one whose id holds a line break."""
+
+            async def source() -> AsyncIterator[ServerEvent]:
+                """Send one good and one bad event."""
+                try:
+                    yield ServerEvent("ok")
+                    yield ServerEvent("x", id="1\n2")
+                    yield ServerEvent("never sent")
+                finally:
+                    closed.append(True)
+
+            return EventStream(source())
+
+        async def client(server: AsyncServer) -> tuple[list[bytes], bytes]:
+            """Read until the stream ends."""
+            reader, writer = await connect(server)
+            await send(writer, GET_EVENTS)
+            await read_reply(reader, head_only=True)
+            chunks = [await read_chunk(reader), await read_chunk(reader)]
+            rest = await reader.read()
+            writer.close()
+            return chunks, rest
+
+        with caplog.at_level(logging.ERROR, logger="pyweb.server"):
+            chunks, rest = serve(app, client)
+        assert chunks == [b"data: ok\n\n", b""]
+        assert rest == b""
+        assert closed == [True]
+        assert any("could not be encoded" in r.getMessage() for r in caplog.records)
+
     def test_bad_stream_header_is_500_and_closes_the_source(self) -> None:
         """Answer 500 for a stream whose headers cannot be sent, closing its source."""
         hub = EventHub()

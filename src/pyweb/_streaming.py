@@ -95,11 +95,11 @@ class EventPump:
                     await self._send(encode_chunk(b""))
                     return
                 if pending.done():
-                    event = self._result(pending)
-                    if event is None:
+                    data = self._encoded(pending)
+                    if data is None:
                         await self._send(encode_chunk(b""))
                         return
-                    if await self._send(encode_chunk(encode_event(event))):
+                    if await self._send(encode_chunk(data)):
                         pending = self._fetch()
                     continue
                 await self._idle()
@@ -124,6 +124,21 @@ class EventPump:
             return None
         result = task.result()
         return result if isinstance(result, ServerEvent) else None
+
+    def _encoded(self, task: Task[object]) -> bytes | None:
+        """Return the next event's bytes, or ``None`` to end the stream.
+
+        An event that cannot be encoded (say, a line break in its id) is
+        logged and ends the stream, just like a source that fails.
+        """
+        event = self._result(task)
+        if event is None:
+            return None
+        try:
+            return encode_event(event)
+        except ValueError:
+            logger.exception("An event could not be encoded; ending the stream")
+            return None
 
     async def _idle(self) -> None:
         """Wait for something to happen, sending a keep-alive if nothing does."""
