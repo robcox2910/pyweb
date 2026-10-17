@@ -116,7 +116,9 @@ values to your handler as **keyword arguments**, already converted:
 
 `NaN` and infinity are not real JSON, so a `dict` holding
 `float("nan")` is a logged `500` too, and a request body containing
-`NaN` or `Infinity` makes `request.json()` answer `400`.
+`NaN` or `Infinity` makes `request.json()` answer `400`. So does a body that nests lists or
+objects more than `MAX_JSON_NESTING` (100) levels deep, which no honest
+client needs; the check is the same on every platform.
 
 To answer with an error on purpose, `raise HTTPError(409, "already
 taken")`. If your handler crashes with any other exception, the

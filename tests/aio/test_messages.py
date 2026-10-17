@@ -3,6 +3,7 @@
 import pytest
 
 from pyweb.messages import (
+    MAX_JSON_NESTING,
     Headers,
     HTTPError,
     HttpRequest,
@@ -165,6 +166,18 @@ class TestRequest:
         with pytest.raises(HTTPError) as info:
             make_request(body=body).json()
         assert info.value.status == STATUS_BAD_REQUEST
+
+    def test_json_nesting_limit_is_exact(self) -> None:
+        """Accept the limit itself, refuse one level more (lists and objects)."""
+        at_limit = (b"[" * MAX_JSON_NESTING) + (b"]" * MAX_JSON_NESTING)
+        assert make_request(body=at_limit).json() is not None
+        over = (b"[" * (MAX_JSON_NESTING + 1)) + (b"]" * (MAX_JSON_NESTING + 1))
+        with pytest.raises(HTTPError) as info:
+            make_request(body=over).json()
+        assert info.value.status == STATUS_BAD_REQUEST
+        objects = (b'{"a":' * (MAX_JSON_NESTING + 1)) + b"1" + (b"}" * (MAX_JSON_NESTING + 1))
+        with pytest.raises(HTTPError):
+            make_request(body=objects).json()
 
     def test_form(self) -> None:
         """Parse an urlencoded form."""

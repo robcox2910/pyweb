@@ -21,6 +21,7 @@ from pynet.messaging import JsonValue
 from pyweb.http1 import STATUS_REASONS
 
 __all__ = [
+    "MAX_JSON_NESTING",
     "HTTPError",
     "Headers",
     "HttpRequest",
@@ -35,6 +36,9 @@ __all__ = [
     "redirect",
     "text",
 ]
+
+MAX_JSON_NESTING = 100
+"""Deepest list/object nesting ``HttpRequest.json()`` accepts."""
 
 _UNSUPPORTED_MEDIA_TYPE = 415
 _BAD_REQUEST = 400
@@ -179,6 +183,23 @@ def _content_type_parts(headers: Headers) -> tuple[str, str | None]:
     return message.get_content_type(), charset
 
 
+def _nesting_exceeds(value: JsonValue, limit: int) -> bool:
+    """Say whether lists/objects nest deeper than ``limit``.
+
+    Walks with its own stack instead of recursing, so the check can never
+    hit Python's recursion limit.
+    """
+    stack: list[tuple[JsonValue, int]] = [(value, 0)]
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, list | dict):
+            if depth >= limit:
+                return True
+            children = item.values() if isinstance(item, dict) else item
+            stack.extend((child, depth + 1) for child in children)
+    return False
+
+
 @dataclass
 class HttpRequest:
     """One parsed HTTP request."""
@@ -206,14 +227,18 @@ class HttpRequest:
 
         Raises:
             HTTPError: ``400`` if the body is not valid JSON, including the
-                ``NaN``/``Infinity`` words Python would otherwise accept.
+                ``NaN``/``Infinity`` words Python would otherwise accept, or
+                if lists/objects nest deeper than ``MAX_JSON_NESTING``.
 
         """
         try:
-            return json_lib.loads(self.text(), parse_constant=_refuse_constant)
+            value: JsonValue = json_lib.loads(self.text(), parse_constant=_refuse_constant)
         except (ValueError, RecursionError) as exc:
-            # RecursionError: absurdly deep nesting such as "[[[[...]]]]".
+            # RecursionError: some parsers give up on "[[[[...]]]]" themselves.
             raise HTTPError(_BAD_REQUEST, "body is not valid JSON") from exc
+        if _nesting_exceeds(value, MAX_JSON_NESTING):
+            raise HTTPError(_BAD_REQUEST, f"JSON nested deeper than {MAX_JSON_NESTING} levels")
+        return value
 
     def form(self) -> QueryParams:
         """Parse an urlencoded form body."""
