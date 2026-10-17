@@ -44,6 +44,7 @@ _HEADERS_TOO_LARGE = 431
 _NOT_IMPLEMENTED = 501
 _BAD_VERSION = 505
 _REQUEST_LINE_PARTS = 3
+_MAX_LENGTH_DIGITS = 18
 _SUPPORTED_VERSIONS = frozenset({"HTTP/1.0", "HTTP/1.1"})
 _TOKEN_CHARS = frozenset(string.ascii_letters + string.digits + "!#$%&'*+-.^_`|~")
 
@@ -147,7 +148,7 @@ def body_length(head: RequestHead) -> int:
     if not lengths:
         return 0
     tokens = [t.strip() for value in lengths for t in value.split(",")]
-    if not all(t.isascii() and t.isdigit() for t in tokens):
+    if not all(t.isascii() and t.isdigit() and len(t) <= _MAX_LENGTH_DIGITS for t in tokens):
         raise _fail(_BAD_REQUEST, "invalid Content-Length")
     if len({int(t) for t in tokens}) != 1:
         raise _fail(_BAD_REQUEST, "conflicting Content-Length values")

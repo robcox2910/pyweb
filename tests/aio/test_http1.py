@@ -140,13 +140,17 @@ class TestBodyLength:
         """Accept repeated equal values."""
         assert body_length(head([("Content-Length", "5"), ("Content-Length", "5")])) == FIVE
 
+    def test_eighteen_digits_parse(self) -> None:
+        """Accept the longest allowed Content-Length."""
+        assert body_length(head([("Content-Length", "9" * 18)])) == int("9" * 18)
+
     def test_comma_list_equal_values(self) -> None:
         """Accept a comma list of equal values."""
         assert body_length(head([("Content-Length", "5, 5")])) == FIVE
 
     @pytest.mark.parametrize(
         "values",
-        [["5", "6"], ["-1"], ["abc"], [""], ["+5"], ["5 5"]],
+        [["5", "6"], ["9" * 5000], ["1" * 19], ["-1"], ["abc"], [""], ["+5"], ["5 5"]],
     )
     def test_bad_values(self, values: list[str]) -> None:
         """Reject conflicting or non-digit values with 400."""
