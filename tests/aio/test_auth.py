@@ -18,7 +18,7 @@ from pyweb.auth import (
     require,
     safe_next,
 )
-from pyweb.messages import HTTPError, HttpRequest, HttpResponse, JsonValue, empty, json
+from pyweb.messages import HTTPError, HttpRequest, HttpResponse, JsonValue, empty, json, redirect
 from pyweb.security import LoginThrottle, SessionSigner
 from pyweb.testing import TestClient, TestResponse
 
@@ -356,3 +356,31 @@ class TestUsers:
         assert safe_next("/jobs?page=2") == "/jobs?page=2"
         for bad in (None, "", "jobs", "//evil.example", "/\\evil.example", "https://evil.example"):
             assert safe_next(bad) == "/"
+
+    @pytest.mark.parametrize(
+        "bad", ["/\t/evil.example", "/\n/evil.example", "/\r\n/x", "/a\\b", "/\x7fx", "/\x00x"]
+    )
+    def test_safe_next_refuses_control_chars_and_backslashes(self, bad: str) -> None:
+        """Refuse targets a browser could rewrite into another site, or that break headers."""
+        assert safe_next(bad) == "/"
+
+    def test_login_redirect_with_tab_trick_goes_home(self) -> None:
+        """Send a login with ?next=/%09/evil.example back to "/" instead of off-site."""
+        site = build()
+
+        @site.app.post("/form-login")
+        def form_login(request: HttpRequest) -> HttpResponse:  # pyright: ignore[reportUnusedFunction]
+            """Log in and go where ?next= says, if it is safe."""
+            user = site.users.get(request.form().get("name") or "")
+            assert user is not None
+            response = redirect(safe_next(request.query.get("next")))
+            site.auth.login(response, user)
+            return response
+
+        response = go(
+            TestClient(site.app).post(
+                "/form-login", query={"next": "/\t/evil.example"}, form={"name": "ada"}
+            )
+        )
+        assert response.status == SEE_OTHER
+        assert response.headers.get("Location") == "/"

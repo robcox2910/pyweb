@@ -59,9 +59,13 @@ def safe_next(target: str | None) -> str:
     """Return ``target`` if it is a path on this site, else ``"/"``.
 
     Use it before redirecting to a ``?next=`` value, so a crafted link
-    cannot bounce a visitor to someone else's site after login.
+    cannot bounce a visitor to someone else's site after login. Control
+    characters (browsers quietly drop tabs and newlines, so ``/<tab>/evil``
+    would become ``//evil``) and backslashes anywhere are refused too.
     """
-    if not target or not target.startswith("/") or target[1:2] in {"/", "\\"}:
+    if not target or not target.startswith("/") or target[1:2] == "/":
+        return "/"
+    if any(ch < " " or ch in {"\x7f", "\\"} for ch in target):
         return "/"
     return target
 
