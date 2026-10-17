@@ -21,6 +21,7 @@ WEBSOCKET = "WEBSOCKET"
 _LITERAL, _STR, _INT, _PATH = "literal", "str", "int", "path"
 _CONVERTERS = frozenset({_STR, _INT, _PATH})
 _MIN_PARAM_LEN = 3  # "<x>"
+_MAX_INT_DIGITS = 18
 
 
 @dataclass(frozen=True)
@@ -94,7 +95,7 @@ def _parse(pattern: str) -> tuple[_Segment, ...]:
 def _is_int(text: str) -> bool:
     """Return whether text is an optional minus followed by ASCII digits."""
     digits = text.removeprefix("-")
-    return digits.isascii() and digits.isdigit()
+    return len(digits) <= _MAX_INT_DIGITS and digits.isascii() and digits.isdigit()
 
 
 def _convert(seg: _Segment, part: str) -> tuple[bool, object]:

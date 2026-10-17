@@ -6,6 +6,8 @@ from pyweb.routing import WEBSOCKET, RouteMatch, RouteTable
 
 ANSWER = 42
 NEGATIVE = -3
+EIGHTEEN = 18
+HUGE = 5000
 FIRST = 1
 SECOND = 2
 
@@ -58,6 +60,15 @@ class TestMatching:
         table: RouteTable[str] = RouteTable()
         table.add("GET", "/n/<int:id>", "n")
         found = table.match("GET", path)
+        assert found.value is None
+        assert found.allowed == frozenset()
+
+    def test_int_digit_cap(self) -> None:
+        """Match 18 digits but not an absurdly long number."""
+        table: RouteTable[str] = RouteTable()
+        table.add("GET", "/n/<int:id>", "n")
+        assert table.match("GET", "/n/" + "9" * EIGHTEEN).params == {"id": int("9" * EIGHTEEN)}
+        found = table.match("GET", "/n/" + "9" * HUGE)
         assert found.value is None
         assert found.allowed == frozenset()
 
