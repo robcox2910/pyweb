@@ -47,6 +47,9 @@ _REQUEST_LINE_PARTS = 3
 _MAX_LENGTH_DIGITS = 18
 _SUPPORTED_VERSIONS = frozenset({"HTTP/1.0", "HTTP/1.1"})
 _TOKEN_CHARS = frozenset(string.ascii_letters + string.digits + "!#$%&'*+-.^_`|~")
+_LINE_BANNED = frozenset("\r\n\x00")
+_MIN_STATUS = 100
+_MAX_STATUS = 599
 
 
 @dataclass(frozen=True)
@@ -115,7 +118,12 @@ def parse_head(raw: bytes, limits: Limits) -> RequestHead:
         text = raw.decode("latin-1")
     except UnicodeDecodeError as exc:  # pragma: no cover - latin-1 decodes any byte
         raise _fail(_BAD_REQUEST, "head is not latin-1") from exc
-    request_line, *header_lines = text.split("\r\n")
+    lines = text.split("\r\n")
+    if any(ch in _LINE_BANNED for line in lines for ch in line):
+        # A lone CR or LF (or a NUL) could make two programs disagree about
+        # where a line ends -- the trick behind request smuggling.
+        raise _fail(_BAD_REQUEST, "bare CR, LF or NUL in the head")
+    request_line, *header_lines = lines
     parts = request_line.split(" ")
     if len(parts) != _REQUEST_LINE_PARTS or not all(parts):
         raise _fail(_BAD_REQUEST, "malformed request line")
@@ -177,7 +185,21 @@ def wants_keep_alive(head: RequestHead) -> bool:
 
 
 def encode_response_head(status: int, reason: str, headers: list[tuple[str, str]]) -> bytes:
-    """Encode a status line and headers, ending with the blank line."""
+    """Encode a status line and headers, ending with the blank line.
+
+    Raises:
+        ValueError: If the status is not from 100 to 599, or CR, LF or NUL
+            appears in the reason or any header -- which would let someone
+            split one response into two ("response splitting").
+
+    """
+    if not _MIN_STATUS <= status <= _MAX_STATUS:
+        msg = f"status must be from {_MIN_STATUS} to {_MAX_STATUS}, got {status}"
+        raise ValueError(msg)
+    for part in (reason, *(piece for pair in headers for piece in pair)):
+        if any(ch in _LINE_BANNED for ch in part):
+            msg = f"CR, LF and NUL are not allowed in a response head: {part!r}"
+            raise ValueError(msg)
     lines = [f"HTTP/1.1 {status} {reason}", *(f"{k}: {v}" for k, v in headers), "", ""]
     return "\r\n".join(lines).encode("latin-1")
 

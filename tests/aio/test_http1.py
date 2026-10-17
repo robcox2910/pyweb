@@ -19,6 +19,7 @@ from pyweb.http1 import (
 )
 
 LIMITS = Limits()
+OK = 200
 BAD_REQUEST = 400
 LENGTH_REQUIRED = 411
 HEADER_TOO_LARGE = 431
@@ -104,6 +105,12 @@ class TestParseHead:
             (b"GET / HTTP/1.1\r\nnocolon", BAD_REQUEST),
             (b"GET / HTTP/1.1\r\n: empty", BAD_REQUEST),
             (b"GET / HTTP/1.1\r\nBad Name: x", BAD_REQUEST),
+            (b"GET /\r HTTP/1.1", BAD_REQUEST),
+            (b"GET /a\nb HTTP/1.1", BAD_REQUEST),
+            (b"GET /\x00 HTTP/1.1", BAD_REQUEST),
+            (b"GET / HTTP/1.1\r\nX-A: one\rtwo", BAD_REQUEST),
+            (b"GET / HTTP/1.1\r\nX-A: one\ntwo", BAD_REQUEST),
+            (b"GET / HTTP/1.1\r\nX-A: one\x00two", BAD_REQUEST),
         ],
     )
     def test_rejections(self, raw: bytes, status: int) -> None:
@@ -235,6 +242,29 @@ class TestEncoding:
         """Encode status line and headers."""
         data = encode_response_head(200, "OK", [("Content-Length", "2")])
         assert data == b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n"
+
+    @pytest.mark.parametrize(
+        ("reason", "headers"),
+        [
+            ("OK\r\nX-Evil: 1", []),
+            ("OK", [("X-A", "one\r\nX-Evil: 1")]),
+            ("OK", [("X-A", "one\ntwo")]),
+            ("OK", [("X-A", "one\x00two")]),
+            ("OK", [("X-A\r\nX-Evil", "1")]),
+        ],
+    )
+    def test_response_head_refuses_splitting(
+        self, reason: str, headers: list[tuple[str, str]]
+    ) -> None:
+        """Refuse CR, LF and NUL anywhere in the head (response splitting)."""
+        with pytest.raises(ValueError, match="CR, LF"):
+            encode_response_head(OK, reason, headers)
+
+    @pytest.mark.parametrize("status", [99, 600, -1])
+    def test_response_head_refuses_odd_status(self, status: int) -> None:
+        """Refuse a status that is not three digits from 100 to 599."""
+        with pytest.raises(ValueError, match="status"):
+            encode_response_head(status, "Odd", [])
 
     def test_status_reasons(self) -> None:
         """Cover every framework status."""

@@ -27,6 +27,7 @@ from pynet.loop import run_in_thread
 
 from pyweb.http1 import KNOWN_METHODS
 from pyweb.messages import (
+    Headers,
     HTTPError,
     HttpRequest,
     HttpResponse,
@@ -101,6 +102,16 @@ def _coerce(result: object, request: HttpRequest) -> Outcome:
         type(result).__name__,
     )
     return _server_error(request)
+
+
+def _without_body(response: HttpResponse) -> HttpResponse:
+    """Copy a response for HEAD: same headers plus the GET length, no body.
+
+    The handler's own object is left alone, in case it is shared.
+    """
+    headers = Headers(response.headers.items())
+    headers.set("Content-Length", str(len(response.body)))
+    return HttpResponse(response.status, headers)
 
 
 def _link(middleware: Middleware, call_next: CallNext) -> CallNext:
@@ -246,8 +257,8 @@ class App:
         except Exception:
             logger.exception("Unhandled error in %s %s", request.method, request.path)
             outcome = _server_error(request)
-        if request.method == "HEAD" and isinstance(outcome, HttpResponse):
-            outcome.body = b""
+        if request.method == "HEAD" and isinstance(outcome, HttpResponse) and outcome.body:
+            outcome = _without_body(outcome)
         return outcome
 
     async def _dispatch(self, request: HttpRequest) -> Outcome:
@@ -281,7 +292,12 @@ class App:
             return await cast("Awaitable[object]", route.fn(request, **params))
         if route.blocking:
             return await run_in_thread(route.fn, request, **params)
-        return route.fn(request, **params)
+        result = route.fn(request, **params)
+        if inspect.isawaitable(result):
+            # A plain def that hands back a coroutine -- for example a
+            # decorator wrapping an async handler. Await it for them.
+            return await result
+        return result
 
 
 class _MethodNotAllowedError(HTTPError):

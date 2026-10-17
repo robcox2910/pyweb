@@ -87,6 +87,24 @@ class TestHandlers:
         assert go(fetch(app)).body == b"sync"
         assert seen == [threading.current_thread()]
 
+    def test_sync_wrapper_returning_awaitable_is_awaited(self) -> None:
+        """Await the result of a plain def that hands back a coroutine."""
+        app = App()
+
+        async def inner(_request: HttpRequest) -> HttpResponse:
+            """Do the real work asynchronously."""
+            await sleep(0)
+            return text("wrapped")
+
+        @app.get("/")
+        def wrapper(request: HttpRequest) -> Coroutine[Any, Any, HttpResponse]:  # pyright: ignore[reportUnusedFunction]
+            """Forward to the async function, as a decorator might."""
+            return inner(request)
+
+        response = go(fetch(app))
+        assert response.status == STATUS_OK
+        assert response.body == b"wrapped"
+
     def test_blocking_handler_runs_off_loop_and_others_continue(self) -> None:
         """Run a blocking handler on a helper thread while others are served."""
         app = App()
@@ -368,7 +386,39 @@ class TestHead:
         head = go(fetch(app, "HEAD"))
         assert head.status == STATUS_OK
         assert head.body == b""
+        assert head.headers.get("Content-Length") == str(len(get.body))
+        head.headers.remove("Content-Length")
         assert head.headers.items() == get.headers.items()
+
+    def test_head_does_not_change_the_handlers_response(self) -> None:
+        """Leave a shared response object untouched when answering HEAD."""
+        app = App()
+        shared = text("hello")
+
+        @app.get("/")
+        def page(_request: HttpRequest) -> HttpResponse:  # pyright: ignore[reportUnusedFunction]
+            """Answer with the same object every time."""
+            return shared
+
+        head = go(fetch(app, "HEAD"))
+        assert head is not shared
+        assert shared.body == b"hello"
+        assert "Content-Length" not in shared.headers
+        assert go(fetch(app, "GET")).body == b"hello"
+
+    def test_head_keeps_a_handlers_own_length_when_body_is_empty(self) -> None:
+        """Keep the Content-Length a handler set for an already-empty HEAD answer."""
+        app = App()
+
+        @app.get("/")
+        def page(_request: HttpRequest) -> HttpResponse:  # pyright: ignore[reportUnusedFunction]
+            """Answer with a length but no body, as a HEAD-aware handler might."""
+            response = HttpResponse()
+            response.headers.set("Content-Length", str(USER_ID))
+            return response
+
+        head = go(fetch(app, "HEAD"))
+        assert head.headers.get("Content-Length") == str(USER_ID)
 
 
 class TestMiddleware:
