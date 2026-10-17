@@ -55,6 +55,11 @@ of 100 000.)
 - Keys are compared in constant time so the clock cannot leak hints.
 - `LoginThrottle` locks a username for 30 seconds after 5 failures in
   5 minutes, so guessing is slow even before hashing.
+- The throttle is safe to share between threads (`blocking=True` login
+  handlers run on helper threads). `authenticate` counts each attempt
+  with `throttle.begin(name)` *before* checking the password -- like
+  taking a numbered ticket at the door -- so even 16 guesses sent at the
+  same instant check at most 5 passwords; the rest get `429`.
 
 ## What We Test
 
@@ -62,6 +67,8 @@ of 100 000.)
 - The right password passes; a wrong one or an altered key fails.
 - Malformed, empty, zero-round and absurd-round strings give `False`.
 - The throttle locks, unlocks, forgets old failures and clears on success.
+- Four threads hammering the throttle raise no errors, and 16 parallel
+  wrong guesses check exactly 5 passwords before the lockout.
 
 ## Next Up
 

@@ -79,20 +79,30 @@ def authenticate(
     """Check a name and password, counting failures with the throttle.
 
     This does slow hashing on purpose, so call it from a handler
-    registered with ``blocking=True``.
+    registered with ``blocking=True``. The attempt is counted with
+    ``throttle.begin`` *before* the password is checked, so parallel
+    guesses for one name never check more than the throttle's
+    ``max_failures`` passwords between lockouts.
 
     Raises:
-        HTTPError: ``429`` while the name is locked out.
+        HTTPError: ``429`` while the name is locked out, or while enough
+            attempts for it are already in progress to reach the limit.
 
     """
-    if throttle.locked(name):
+    if not throttle.begin(name):
         logger.info("Login refused: too many recent failures")
         raise HTTPError(_TOO_MANY_REQUESTS, "too many failed logins; try again later")
-    user = users.get(name)
-    matched = verify_password(password, user.password_hash if user else _dummy_hash())
-    if user is not None and matched:
-        throttle.record_success(name)
-        return user
-    throttle.record_failure(name)
-    logger.debug("Login failed")
-    return None
+    found: User | None = None
+    try:
+        user = users.get(name)
+        matched = verify_password(password, user.password_hash if user else _dummy_hash())
+        if user is not None and matched:
+            found = user
+    finally:
+        # Always finish the attempt; a crash counts as a failure (fail closed).
+        if found is not None:
+            throttle.record_success(name)
+        else:
+            throttle.record_failure(name)
+            logger.debug("Login failed")
+    return found

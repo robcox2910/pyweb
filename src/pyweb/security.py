@@ -9,7 +9,9 @@ import binascii
 import hmac
 import json
 import secrets
+import threading
 import time
+from collections import deque
 from collections.abc import Callable, Mapping
 
 from pycrypt.hmac import hmac_sign, hmac_verify
@@ -187,7 +189,18 @@ def csrf_matches(expected: str, given: str | None) -> bool:
 
 
 class LoginThrottle:
-    """Lock a username out for a while after too many recent failures."""
+    """Lock a username out for a while after too many recent failures.
+
+    Think of a bike lock with a counter: after five wrong codes it jams
+    for half a minute. Safe to share between threads (``blocking=True``
+    handlers run on PyNet's helper threads): every method holds a lock.
+
+    ``begin`` counts an attempt *before* the slow password check, so a
+    burst of parallel guesses for one name can never check more than
+    ``max_failures`` passwords between lockouts: an attempt may only start
+    while recorded failures plus attempts still in progress are below the
+    limit. ``authenticate`` uses it for you.
+    """
 
     def __init__(
         self,
@@ -210,43 +223,84 @@ class LoginThrottle:
         self._window = window
         self._lockout = lockout
         self._clock = clock
-        self._failures: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+        self._failures: dict[str, deque[float]] = {}
         self._locked_until: dict[str, float] = {}
+        self._in_progress: dict[str, int] = {}
+        # Oldest first, so pruning only looks at entries that have expired.
+        self._failure_times: deque[tuple[float, str]] = deque()
+        self._lockout_ends: deque[tuple[float, str]] = deque()
 
     def _prune(self, now: float) -> None:
-        """Forget expired failures and finished lockouts."""
-        for name in list(self._failures):
-            recent = [t for t in self._failures[name] if now - t < self._window]
-            if recent:
-                self._failures[name] = recent
-            else:
+        """Forget expired failures and finished lockouts (call with the lock held)."""
+        while self._failure_times and now - self._failure_times[0][0] >= self._window:
+            _, name = self._failure_times.popleft()
+            times = self._failures.get(name)
+            while times and now - times[0] >= self._window:
+                times.popleft()
+            if times is not None and not times:
                 del self._failures[name]
-        for name in list(self._locked_until):
-            if self._locked_until[name] <= now:
+        while self._lockout_ends and self._lockout_ends[0][0] <= now:
+            _, name = self._lockout_ends.popleft()
+            until = self._locked_until.get(name)
+            if until is not None and until <= now:
                 del self._locked_until[name]
+
+    def _finish(self, username: str) -> None:
+        """End one attempt started with ``begin``, if any (lock held)."""
+        count = self._in_progress.get(username, 0)
+        if count > 1:
+            self._in_progress[username] = count - 1
+        elif count == 1:
+            del self._in_progress[username]
+
+    def begin(self, username: str) -> bool:
+        """Start a login attempt; return False if it must be refused.
+
+        Refused while the name is locked out, or while its recent failures
+        plus attempts still in progress already reach ``max_failures``.
+        Finish every started attempt with ``record_success`` or
+        ``record_failure``.
+        """
+        with self._lock:
+            self._prune(self._clock())
+            if username in self._locked_until:
+                return False
+            used = len(self._failures.get(username, ())) + self._in_progress.get(username, 0)
+            if used >= self._max_failures:
+                return False
+            self._in_progress[username] = self._in_progress.get(username, 0) + 1
+            return True
 
     def locked(self, username: str) -> bool:
         """Return True while the name is locked out."""
-        now = self._clock()
-        self._prune(now)
-        return username in self._locked_until
+        with self._lock:
+            self._prune(self._clock())
+            return username in self._locked_until
 
     def record_failure(self, username: str) -> None:
         """Note a failed login and start a lockout if there were too many."""
-        now = self._clock()
-        self._prune(now)
-        failures = self._failures.setdefault(username, [])
-        failures.append(now)
-        if len(failures) >= self._max_failures:
-            self._locked_until[username] = now + self._lockout
-            del self._failures[username]
+        with self._lock:
+            now = self._clock()
+            self._prune(now)
+            self._finish(username)
+            failures = self._failures.setdefault(username, deque())
+            failures.append(now)
+            self._failure_times.append((now, username))
+            if len(failures) >= self._max_failures:
+                self._locked_until[username] = now + self._lockout
+                self._lockout_ends.append((now + self._lockout, username))
+                del self._failures[username]
 
     def record_success(self, username: str) -> None:
         """Forget all failures for the name after a good login."""
-        self._prune(self._clock())
-        self._failures.pop(username, None)
+        with self._lock:
+            self._prune(self._clock())
+            self._finish(username)
+            self._failures.pop(username, None)
 
     def tracked(self) -> int:
         """Return how many names are currently remembered."""
-        self._prune(self._clock())
-        return len(self._failures.keys() | self._locked_until.keys())
+        with self._lock:
+            self._prune(self._clock())
+            return len(self._failures.keys() | self._locked_until.keys())
