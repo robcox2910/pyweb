@@ -25,6 +25,7 @@ MAX_AGE = 60
 STATUS_CREATED = 201
 STATUS_UNKNOWN = 499
 COOKIE_COUNT = 2
+NESTING_DEPTH = 100_000
 
 
 def make_request(
@@ -156,6 +157,13 @@ class TestRequest:
         """Turn invalid JSON into 400."""
         with pytest.raises(HTTPError) as info:
             make_request(body=b"{nope").json()
+        assert info.value.status == STATUS_BAD_REQUEST
+
+    def test_json_too_deep(self) -> None:
+        """Turn absurdly nested JSON into 400, not a crash."""
+        body = (b"[" * NESTING_DEPTH) + (b"]" * NESTING_DEPTH)
+        with pytest.raises(HTTPError) as info:
+            make_request(body=body).json()
         assert info.value.status == STATUS_BAD_REQUEST
 
     def test_form(self) -> None:

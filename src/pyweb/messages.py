@@ -13,6 +13,7 @@ import string
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from email.message import Message
+from typing import Protocol, runtime_checkable
 from urllib.parse import parse_qsl
 
 from pynet.messaging import JsonValue
@@ -25,7 +26,9 @@ __all__ = [
     "HttpRequest",
     "HttpResponse",
     "JsonValue",
+    "Outcome",
     "QueryParams",
+    "StreamingResponse",
     "empty",
     "html",
     "json",
@@ -191,7 +194,8 @@ class HttpRequest:
         """Parse the body as JSON."""
         try:
             return json_lib.loads(self.text())
-        except ValueError as exc:
+        except (ValueError, RecursionError) as exc:
+            # RecursionError: absurdly deep nesting such as "[[[[...]]]]".
             raise HTTPError(_BAD_REQUEST, "body is not valid JSON") from exc
 
     def form(self) -> QueryParams:
@@ -273,6 +277,22 @@ class HttpResponse:
     def delete_cookie(self, name: str, path: str = "/") -> None:
         """Ask the browser to forget a cookie."""
         self.set_cookie(name, "", max_age=0, path=path)
+
+
+@runtime_checkable
+class StreamingResponse(Protocol):
+    """A response whose body is sent a piece at a time (such as server-sent events).
+
+    It has a status and headers like any response; the server sends the
+    body as it is produced instead of all at once.
+    """
+
+    status: int
+    headers: Headers
+
+
+type Outcome = HttpResponse | StreamingResponse
+"""Anything a handler or middleware may answer with."""
 
 
 def json(data: JsonValue, status: int = 200) -> HttpResponse:
