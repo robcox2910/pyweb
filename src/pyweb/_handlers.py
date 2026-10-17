@@ -5,6 +5,8 @@ Private to PyWeb: import from ``pyweb.app`` or the package instead.
 """
 
 import logging
+import weakref
+from collections.abc import Callable
 from typing import cast
 
 from pyweb.messages import (
@@ -27,6 +29,22 @@ _UPGRADE_REQUIRED = 426
 _ERROR_PAGE = (
     "<!doctype html><title>500 Internal Server Error</title><h1>500 Internal Server Error</h1>"
 )
+
+
+_registered: weakref.WeakSet[Callable[..., object]] = weakref.WeakSet()
+
+
+def remember_registered(fn: Callable[..., object]) -> None:
+    """Note that an App has put ``fn`` in its route table."""
+    try:
+        _registered.add(fn)
+    except TypeError:  # Some callables cannot be weakly referenced.
+        return
+
+
+def is_registered(fn: object) -> bool:
+    """Return whether any App has already registered ``fn`` as a handler."""
+    return fn in _registered  # A WeakSet says False for unweakrefable things.
 
 
 def server_error(request: HttpRequest) -> HttpResponse:

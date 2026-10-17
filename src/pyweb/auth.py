@@ -25,6 +25,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from typing import cast
 from urllib.parse import quote
 
+from pyweb._handlers import is_registered
 from pyweb._users import InMemoryUsers, User, UserStore, authenticate, current_user
 from pyweb.app import CallNext, WebSocketUpgrade
 from pyweb.messages import HTTPError, HttpRequest, HttpResponse, JsonValue, Outcome, redirect
@@ -156,11 +157,21 @@ def require[F: Callable[..., object]](*roles: str) -> Callable[[F], F]:
     the ``SessionAuth`` middleware does the check *before* the handshake;
     without that middleware the wrapped handler raises instead (and the
     WebSocket is closed with 1011), so it fails closed.
+
+    Raises:
+        TypeError: When the decorated function is already registered as a
+            route -- ``@require`` was put *above* the route decorator, so
+            the App holds the unguarded function and the page would be
+            public.
+
     """
     needed = frozenset(roles)
 
     def decorate(fn: F) -> F:
         """Wrap ``fn`` with the check, keeping its name and signature."""
+        if is_registered(fn):
+            msg = "put @require below the route decorator (closer to the function)"
+            raise TypeError(msg)
         if inspect.iscoroutinefunction(fn):
 
             @functools.wraps(fn)

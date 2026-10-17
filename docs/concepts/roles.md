@@ -91,7 +91,11 @@ handler with `authenticate(users, throttle, name, password)` and then
 ## The Rules
 
 - **Put `require` under the route decorator**, so the App registers the
-  guarded version. It works on `async def` and plain `def` handlers, keeps
+  guarded version. Put it on top by mistake and the App would already
+  hold the *unguarded* handler -- a door with the guard standing in the
+  wrong corridor -- so PyWeb stops you straight away with
+  `TypeError: put @require below the route decorator (closer to the
+  function)` instead of quietly leaving the page open to everyone. It works on `async def` and plain `def` handlers, keeps
   the handler's name and path parameters, and stays a plain `def` for a
   plain handler, so `blocking=True` still works.
 - **WebSocket doors too.** `@app.websocket(...)` routes can use
@@ -123,6 +127,8 @@ handler with `authenticate(users, throttle, name, password)` and then
 - Bearer tokens work; session and API tokens cannot stand in for each other.
 - Five bad logins lock the name with `429` until the lockout ends.
 - WebSocket upgrades: strangers `401`, wrong role `403`, crew `101`.
+- `@require` above `@app.get` or `@app.websocket` raises `TypeError` when
+  the module is loaded; the right order guards the route.
 
 ## Next Up
 

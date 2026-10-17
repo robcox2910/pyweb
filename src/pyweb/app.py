@@ -30,6 +30,7 @@ from pyweb._handlers import (
     MethodNotAllowedError,
     UpgradeRequiredError,
     coerce,
+    remember_registered,
     server_error,
     without_body,
 )
@@ -189,6 +190,7 @@ class App:
                 msg = f"blocking=True needs a plain def handler, not async def {fn!r}"
                 raise ValueError(msg)
             self._routes.add(method, pattern, _Route(fn, is_async, blocking))
+            remember_registered(fn)
             return fn
 
         return register
@@ -226,6 +228,7 @@ class App:
             """Store the handler under the WEBSOCKET pseudo-method."""
             route = _Route(fn, inspect.iscoroutinefunction(fn), blocking=False)
             self._routes.add(WEBSOCKET, pattern, route)
+            remember_registered(fn)
             return fn
 
         return register
