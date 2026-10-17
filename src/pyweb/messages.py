@@ -157,6 +157,17 @@ class HTTPError(Exception):
         return json({"error": reason, "message": self.message}, self.status)
 
 
+def _refuse_constant(word: str) -> JsonValue:
+    """Refuse ``NaN``, ``Infinity`` and ``-Infinity``: they are not JSON.
+
+    Raises:
+        ValueError: Always.
+
+    """
+    msg = f"{word} is not valid JSON"
+    raise ValueError(msg)
+
+
 def _content_type_parts(headers: Headers) -> tuple[str, str | None]:
     """Return the media type and charset of Content-Type."""
     raw = headers.get("Content-Type")
@@ -191,9 +202,15 @@ class HttpRequest:
             raise HTTPError(_BAD_REQUEST, "body is not valid text") from exc
 
     def json(self) -> JsonValue:
-        """Parse the body as JSON."""
+        """Parse the body as JSON.
+
+        Raises:
+            HTTPError: ``400`` if the body is not valid JSON, including the
+                ``NaN``/``Infinity`` words Python would otherwise accept.
+
+        """
         try:
-            return json_lib.loads(self.text())
+            return json_lib.loads(self.text(), parse_constant=_refuse_constant)
         except (ValueError, RecursionError) as exc:
             # RecursionError: absurdly deep nesting such as "[[[[...]]]]".
             raise HTTPError(_BAD_REQUEST, "body is not valid JSON") from exc
@@ -296,8 +313,14 @@ type Outcome = HttpResponse | StreamingResponse
 
 
 def json(data: JsonValue, status: int = 200) -> HttpResponse:
-    """Build a JSON response."""
-    response = HttpResponse(status, body=json_lib.dumps(data).encode())
+    """Build a JSON response.
+
+    Raises:
+        ValueError: If ``data`` holds ``NaN`` or an infinity, which are not
+            valid JSON (a handler that does this gets a logged 500).
+
+    """
+    response = HttpResponse(status, body=json_lib.dumps(data, allow_nan=False).encode())
     response.headers.set("Content-Type", "application/json")
     return response
 

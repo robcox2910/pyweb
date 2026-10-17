@@ -297,15 +297,13 @@ class App:
         call_next: CallNext = self._dispatch
         for middleware in reversed(self._middleware):
             call_next = _link(middleware, call_next)
-        result: object
         try:
-            result = await call_next(request)
+            outcome = _checked(await call_next(request), request)
         except HTTPError as exc:
-            result = exc.to_response(request)
+            outcome = exc.to_response(request)
         except Exception:
             logger.exception("Unhandled error in %s %s", request.method, request.path)
-            result = server_error(request)
-        outcome = _checked(result, request)
+            outcome = server_error(request)
         if request.method == "HEAD" and isinstance(outcome, HttpResponse) and outcome.body:
             outcome = without_body(outcome)
         return outcome

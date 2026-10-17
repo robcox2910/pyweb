@@ -106,6 +106,10 @@ values to your handler as **keyword arguments**, already converted:
 | a `str` | an HTML page |
 | anything else | a `500 Internal Server Error` (and a log message) |
 
+`NaN` and infinity are not real JSON, so a `dict` holding
+`float("nan")` is a logged `500` too, and a request body containing
+`NaN` or `Infinity` makes `request.json()` answer `400`.
+
 To answer with an error on purpose, `raise HTTPError(409, "already
 taken")`. If your handler crashes with any other exception, the
 visitor gets a plain `500` with **no** traceback (secrets stay secret),
@@ -123,7 +127,8 @@ headers and throws the body away.
 - `blocking=True` on an `async def` is refused.
 - `<int:...>` parameters arrive as `int` keyword arguments.
 - `dict`/`list` become JSON, `str` becomes HTML, anything else is a
-  logged `500`.
+  logged `500`; so is a `dict` holding `NaN`, and `NaN` or `Infinity` in
+  a request body is a `400`.
 - `HTTPError(409)` answers `409`; a crash answers a generic `500` with
   no traceback in the body, and is logged.
 - A wrong method answers `405` with an `Allow` header such as
