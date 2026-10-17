@@ -27,6 +27,7 @@ STATUS_OK = 200
 STATUS_NOT_FOUND = 404
 STATUS_METHOD_NOT_ALLOWED = 405
 STATUS_CONFLICT = 409
+STATUS_UPGRADE_REQUIRED = 426
 STATUS_ERROR = 500
 USER_ID = 42
 WAIT_SECONDS = 2.0
@@ -342,15 +343,15 @@ class TestErrors:
         assert response.status == STATUS_METHOD_NOT_ALLOWED
         assert response.headers.get("Allow") == "GET, HEAD"
 
-    def test_websocket_only_path_is_404_for_plain_requests(self) -> None:
-        """Answer 404 when only a WebSocket route matches a plain request."""
+    def test_websocket_only_path_needs_an_upgrade(self) -> None:
+        """Answer 426 to a plain GET on a WebSocket-only path, 404 to the pseudo-method."""
         app = App()
 
         @app.websocket("/chat")
         async def chat(socket: object) -> None:  # pyright: ignore[reportUnusedFunction]
             """Do nothing."""
 
-        assert go(fetch(app, "GET", "/chat")).status == STATUS_NOT_FOUND
+        assert go(fetch(app, "GET", "/chat")).status == STATUS_UPGRADE_REQUIRED
         assert go(fetch(app, "WEBSOCKET", "/chat")).status == STATUS_NOT_FOUND
 
     def test_websocket_route_lookup(self) -> None:

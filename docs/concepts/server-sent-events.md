@@ -173,5 +173,5 @@ source is closed straight away.
 
 ## Next Up
 
-Need messages going **both** ways, like a walkie-talkie instead of a
-radio? That is what WebSockets are for.
+Need messages going **both** ways, like a phone call instead of a
+radio? That is what [WebSockets](websockets-in-pyweb.md) are for.

@@ -519,19 +519,6 @@ class TestErrors:
         assert reply.status == SERVER_ERROR
         assert rest == b""
 
-    def test_websocket_upgrade_is_500_until_supported(self) -> None:
-        """Answer 500 for an upgrade while WebSockets are not built yet."""
-        app = App()
-
-        @app.websocket("/ws")
-        async def chat(_socket: object) -> None:  # pyright: ignore[reportUnusedFunction]
-            """Do nothing."""
-
-        raw = b"GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
-        reply, rest = serve(app, lambda s: exchange(s, raw))
-        assert reply.status == SERVER_ERROR
-        assert rest == b""
-
 
 class TestClientGoesAway:
     """Test clients that hang up part-way through."""

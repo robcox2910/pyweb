@@ -30,6 +30,7 @@ STATUS_REASONS: dict[int, str] = {
     411: "Length Required",
     413: "Content Too Large",
     415: "Unsupported Media Type",
+    426: "Upgrade Required",
     429: "Too Many Requests",
     431: "Request Header Fields Too Large",
     500: "Internal Server Error",

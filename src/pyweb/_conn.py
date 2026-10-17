@@ -22,7 +22,8 @@ from pynet.loop import Cancelled, Task, current_task, get_running_loop, timeout
 from pynet.streams import IncompleteReadError, LimitOverrunError, StreamReader, StreamWriter
 
 from pyweb._streaming import EventPump
-from pyweb.app import App, Handler
+from pyweb._upgrade import WebSocketSession
+from pyweb.app import App, WebSocketUpgrade, wants_websocket
 from pyweb.http1 import (
     STATUS_REASONS,
     HttpParseError,
@@ -116,13 +117,14 @@ class Connection:
         self._task: Task[object] | None = current_task()
         self.idle = False
         self.closing = False
-        self._pump: EventPump | None = None
+        # An open event stream or WebSocket: told to stop when closing begins.
+        self._live: EventPump | WebSocketSession | None = None
 
     def begin_close(self) -> None:
-        """Finish the current request (ending any open stream), then close."""
+        """Finish the current request (ending any stream or WebSocket), then close."""
         self.closing = True
-        if self._pump is not None:
-            self._pump.stop()
+        if self._live is not None:
+            self._live.stop()
 
     def cancel(self) -> None:
         """Cut the connection off (used when the grace period runs out)."""
@@ -171,18 +173,19 @@ class Connection:
             request = await self._read_request(head)
         except HttpParseError as exc:
             return await self._send(_error(exc.status, head, str(exc)), head, started, keep=False)
-        websocket = self._websocket_route(request)
-        if websocket is not None:
-            return await self._fallback(self._upgrade(request, *websocket), head, started)
         try:
             outcome: Outcome = await self._app.handle(request)
         except Exception:
             logger.exception("App failed on %s %s", head.method, _log_path(head))
             outcome = _error(_SERVER_ERROR, head)
         # Decided after the handler: the server may have begun closing meanwhile.
+        # A turned-down WebSocket upgrade closes too: the client meant to switch.
         keep = wants_keep_alive(head) and not self.closing and not _asks_to_close(outcome)
+        keep = keep and not wants_websocket(request)
         if isinstance(outcome, HttpResponse):
             return await self._send(outcome, head, started, keep=keep)
+        if isinstance(outcome, WebSocketUpgrade):
+            return await self._upgrade(outcome, head, started)
         if head.method == "HEAD":
             try:
                 return await self._send(outcome, head, started, keep=keep)
@@ -233,13 +236,6 @@ class Connection:
                 raise HttpParseError(_REQUEST_TIMEOUT, "the request body took too long") from exc
         headers = Headers(head.headers)
         return HttpRequest(head.method, path, QueryParams(query), headers, body, self._client)
-
-    def _websocket_route(self, request: HttpRequest) -> tuple[Handler, dict[str, object]] | None:
-        """Return the WebSocket route if this is an upgrade request for one."""
-        upgrade = (request.headers.get("Upgrade") or "").lower()
-        if request.method != "GET" or upgrade != "websocket":
-            return None
-        return self._app.websocket_route(request.path)
 
     # -- writing ------------------------------------------------------------
 
@@ -322,14 +318,14 @@ class Connection:
             )
 
     async def _fallback(self, hook: Awaitable[bool], head: RequestHead, started: float) -> bool:
-        """Await a stream/upgrade hook; answer 500 and close if it is not built yet."""
+        """Await a stream hook; answer 500 and close if it is not built yet."""
         try:
             return await hook
         except NotImplementedError:
             logger.exception("%s %s needs a feature not built yet", head.method, _log_path(head))
             return await self._send(_error(_SERVER_ERROR, head), head, started, keep=False)
 
-    # -- hooks filled in by later tasks ------------------------------------
+    # -- long-lived answers --------------------------------------------------
 
     async def _write_stream(
         self, outcome: StreamingResponse, head: RequestHead, started: float
@@ -350,23 +346,33 @@ class Connection:
             logger.exception("Stream for %s could not be sent; answering 500", _log_path(head))
             return await self._send(_error(_SERVER_ERROR, head), head, started, keep=False)
         pump = EventPump(outcome, self._reader, self._writer, self._limits.write_timeout)
-        self._pump = pump
+        self._live = pump
         if self.closing:
             pump.stop()
         try:
             await pump.run(data)
         finally:
-            self._pump = None
+            self._live = None
         self._log(head, outcome.status, pump.body_bytes, started)
         return False
 
-    async def _upgrade(
-        self, request: HttpRequest, handler: Handler, params: dict[str, object]
-    ) -> bool:
-        """Hand the socket to a WebSocket handler; return whether to keep it (never)."""
-        del request, handler, params  # used once WebSockets are built
-        msg = "WebSocket upgrades are not supported yet"
-        raise NotImplementedError(msg)
+    async def _upgrade(self, upgrade: WebSocketUpgrade, head: RequestHead, started: float) -> bool:
+        """Hand the socket to a WebSocket handler; the connection is never reused after."""
+        session = WebSocketSession(
+            upgrade,
+            self._reader,
+            self._writer,
+            max_message_size=self._limits.max_body_bytes,
+        )
+        self._live = session
+        if self.closing:
+            session.stop()
+        try:
+            status = await session.run()
+        finally:
+            self._live = None
+        self._log(head, status, 0, started)
+        return False
 
 
 def _asks_to_close(outcome: Outcome) -> bool:

@@ -20,7 +20,7 @@ Handlers come in three kinds:
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from pynet.loop import run_in_thread
@@ -39,7 +39,15 @@ from pyweb.messages import (
 )
 from pyweb.routing import WEBSOCKET, RouteTable
 
-__all__ = ["App", "CallNext", "Handler", "Hook", "Middleware"]
+__all__ = [
+    "App",
+    "CallNext",
+    "Handler",
+    "Hook",
+    "Middleware",
+    "WebSocketUpgrade",
+    "wants_websocket",
+]
 
 logger = logging.getLogger("pyweb.app")
 
@@ -58,6 +66,8 @@ type Hook = Callable[[], object]
 _NOT_FOUND = 404
 _METHOD_NOT_ALLOWED = 405
 _SERVER_ERROR = 500
+_SWITCHING_PROTOCOLS = 101
+_UPGRADE_REQUIRED = 426
 _ERROR_PAGE = (
     "<!doctype html><title>500 Internal Server Error</title><h1>500 Internal Server Error</h1>"
 )
@@ -78,6 +88,39 @@ class _Route:
     fn: Handler
     is_async: bool
     blocking: bool
+
+
+@dataclass
+class WebSocketUpgrade:
+    """The answer that means "yes, switch this connection to a WebSocket".
+
+    The App gives this back (through every middleware, like any other
+    answer) when an upgrade request reaches a WebSocket route. The server
+    then does the handshake and runs ``handler(ws, request, **params)``.
+    A middleware that wants to say no simply returns a response instead.
+
+    Attributes:
+        handler: The WebSocket handler to run.
+        params: The path parameters from the route.
+        request: The request as it reached the end of the middleware
+            chain (so anything middleware attached to it is kept).
+        status: Always ``101 Switching Protocols``.
+        headers: Present so middleware can treat it like any answer;
+            the handshake reply does not use them.
+
+    """
+
+    handler: Handler
+    params: dict[str, object]
+    request: HttpRequest
+    status: int = _SWITCHING_PROTOCOLS
+    headers: Headers = field(default_factory=Headers)
+
+
+def wants_websocket(request: HttpRequest) -> bool:
+    """Return whether the request is a GET asking to become a WebSocket."""
+    tokens = (request.headers.get("Upgrade") or "").lower().split(",")
+    return request.method == "GET" and "websocket" in (token.strip() for token in tokens)
 
 
 def _server_error(request: HttpRequest) -> HttpResponse:
@@ -192,7 +235,13 @@ class App:
         return self.route("DELETE", pattern, blocking=blocking)
 
     def websocket(self, pattern: str) -> _Decorator:
-        """Register a WebSocket handler for a pattern."""
+        """Register a WebSocket handler for a pattern.
+
+        The handler is called as ``await handler(ws, request, **params)``
+        with a ``pynet.ws.WebSocket``. When it returns, the server closes
+        the WebSocket with 1000; when it raises, with 1011. A plain GET
+        to a WebSocket-only path is answered ``426 Upgrade Required``.
+        """
 
         def register[F: Handler](fn: F) -> F:
             """Store the handler under the WEBSOCKET pseudo-method."""
@@ -244,6 +293,10 @@ class App:
     async def handle(self, request: HttpRequest) -> Outcome:
         """Answer one request: middleware, routing, the handler, then coercion.
 
+        An upgrade request for a WebSocket route goes through the same
+        middleware; instead of calling a handler, the innermost step
+        answers with a ``WebSocketUpgrade`` for the server to carry out.
+
         Never raises for an ordinary ``Exception``: an ``HTTPError`` becomes
         its own response and anything else becomes a logged, generic 500.
         """
@@ -263,6 +316,9 @@ class App:
 
     async def _dispatch(self, request: HttpRequest) -> Outcome:
         """Find the route and call its handler, turning errors into responses."""
+        upgrade = self._upgrade_for(request)
+        if upgrade is not None:
+            return upgrade
         try:
             route, params = self._find(request)
             request.path_params = params
@@ -273,6 +329,15 @@ class App:
             logger.exception("Unhandled error in %s %s", request.method, request.path)
             return _server_error(request)
 
+    def _upgrade_for(self, request: HttpRequest) -> WebSocketUpgrade | None:
+        """Return the upgrade marker if this request asks for a WebSocket route."""
+        found = self.websocket_route(request.path) if wants_websocket(request) else None
+        if found is None:
+            return None
+        handler, params = found
+        request.path_params = params
+        return WebSocketUpgrade(handler, params, request)
+
     def _find(self, request: HttpRequest) -> tuple[_Route, dict[str, object]]:
         """Match the request to a route, or raise 404/405."""
         if request.method == WEBSOCKET:
@@ -282,6 +347,8 @@ class App:
             return found.value, found.params
         allowed = sorted(found.allowed - {WEBSOCKET})
         if not allowed:
+            if WEBSOCKET in found.allowed and request.method in {"GET", "HEAD"}:
+                raise _UpgradeRequiredError
             raise HTTPError(_NOT_FOUND)
         raise _MethodNotAllowedError(allowed)
 
@@ -312,4 +379,18 @@ class _MethodNotAllowedError(HTTPError):
         """Render the 405 with an ``Allow`` header."""
         response = super().to_response(request)
         response.headers.set("Allow", ", ".join(self.allowed))
+        return response
+
+
+class _UpgradeRequiredError(HTTPError):
+    """A 426: this path only speaks WebSocket."""
+
+    def __init__(self) -> None:
+        """Set the status."""
+        super().__init__(_UPGRADE_REQUIRED)
+
+    def to_response(self, request: HttpRequest) -> HttpResponse:
+        """Render the 426 with the ``Upgrade`` header saying what to ask for."""
+        response = super().to_response(request)
+        response.headers.set("Upgrade", "websocket")
         return response
