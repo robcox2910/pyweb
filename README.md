@@ -57,6 +57,18 @@ uv run python examples/hello_server.py
 uv run pytest
 ```
 
+## Concepts
+
+Every concept is explained with real-world analogies:
+
+| Concept | Doc | Analogy |
+|---------|-----|---------|
+| Requests | [requests.md](docs/concepts/requests.md) | The incoming letter |
+| Responses | [responses.md](docs/concepts/responses.md) | The reply letter |
+| Routing | [routing.md](docs/concepts/routing.md) | The mailroom |
+| Templates | [templates.md](docs/concepts/templates.md) | Form letters with blanks |
+| Server | [server.md](docs/concepts/server.md) | The post office |
+
 <!-- docs:start -->
 ## Documentation
 
