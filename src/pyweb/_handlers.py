@@ -36,8 +36,19 @@ def server_error(request: HttpRequest) -> HttpResponse:
     return json({"error": "Internal Server Error"}, _SERVER_ERROR)
 
 
-def coerce(result: object, request: HttpRequest) -> Outcome:
-    """Turn a handler's return value into a response."""
+def coerce(result: object, request: HttpRequest, *, source: str = "Handler") -> Outcome:
+    """Turn a handler's return value into a response.
+
+    Args:
+        result: What the handler (or middleware) gave back.
+        request: The request being answered.
+        source: Who produced ``result``, for the log message.
+
+    Returns:
+        The response itself, JSON for a ``dict``/``list``, HTML for a
+        ``str``, or a logged generic 500 for anything else.
+
+    """
     if isinstance(result, HttpResponse | StreamingResponse):
         return result
     if isinstance(result, dict | list):
@@ -45,7 +56,8 @@ def coerce(result: object, request: HttpRequest) -> Outcome:
     if isinstance(result, str):
         return html(result)
     logger.error(
-        "Handler for %s %s returned unsupported type %s",
+        "%s for %s %s returned unsupported type %s",
+        source,
         request.method,
         request.path,
         type(result).__name__,

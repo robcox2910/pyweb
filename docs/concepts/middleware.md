@@ -99,6 +99,12 @@ it. If a middleware itself raises `HTTPError`, that becomes the
 response; if it crashes, the visitor gets a generic `500` and the
 traceback goes to the `pyweb.app` log.
 
+A middleware that forgets to `return` hands back `None` -- like a waiter
+who walks back from the kitchen with empty hands. PyWeb notices, logs
+which kind of value came back, and answers a generic `500`, so the
+connection keeps working. (A `dict`, `list` or `str` is fine: it becomes
+JSON or HTML, just like a handler's.)
+
 ## What We Test
 
 - Two middlewares run in registration order on the way in and in
@@ -108,6 +114,9 @@ traceback goes to the `pyweb.app` log.
 - Middleware sees `404` as a response.
 - `HTTPError` from middleware becomes its response; a crash becomes a
   logged `500`.
+- A middleware that forgets `return` (or answers `42`) gives a logged
+  `500`, over a real socket and in the `TestClient`, and the next request
+  on the same connection still works.
 - Middleware can add headers to the outgoing response.
 
 ## Next Up

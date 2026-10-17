@@ -41,6 +41,7 @@ from pyweb.messages import (
     HttpRequest,
     HttpResponse,
     Outcome,
+    StreamingResponse,
 )
 from pyweb.routing import WEBSOCKET, RouteTable
 
@@ -130,6 +131,19 @@ def _link(middleware: Middleware, call_next: CallNext) -> CallNext:
         return await middleware(request, call_next)
 
     return call
+
+
+def _checked(result: object, request: HttpRequest) -> Outcome:
+    """Make sure the middleware chain answered with something the server can send.
+
+    A response, a stream or a ``WebSocketUpgrade`` passes straight through.
+    A ``dict``, ``list`` or ``str`` is turned into JSON or HTML, just like
+    a handler's. Anything else -- most often ``None`` from a middleware
+    that forgot ``return`` -- is logged and becomes a generic 500.
+    """
+    if isinstance(result, HttpResponse | StreamingResponse | WebSocketUpgrade):
+        return result
+    return coerce(result, request, source="Middleware (a missing return?)")
 
 
 async def _run_hook(hook: Hook) -> None:
@@ -280,13 +294,15 @@ class App:
         call_next: CallNext = self._dispatch
         for middleware in reversed(self._middleware):
             call_next = _link(middleware, call_next)
+        result: object
         try:
-            outcome = await call_next(request)
+            result = await call_next(request)
         except HTTPError as exc:
-            outcome = exc.to_response(request)
+            result = exc.to_response(request)
         except Exception:
             logger.exception("Unhandled error in %s %s", request.method, request.path)
-            outcome = server_error(request)
+            result = server_error(request)
+        outcome = _checked(result, request)
         if request.method == "HEAD" and isinstance(outcome, HttpResponse) and outcome.body:
             outcome = without_body(outcome)
         return outcome
