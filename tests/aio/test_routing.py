@@ -47,6 +47,14 @@ class TestMatching:
         assert table.match("GET", "/x/7").value == FIRST
         assert table.match("GET", "/x/abc").value == SECOND
 
+    def test_literals_win_piece_by_piece_from_the_left(self) -> None:
+        """Compare pieces left to right: a literal first piece beats a blank one."""
+        table: RouteTable[str] = RouteTable()
+        table.add("GET", "/<x>/b", "blank first")
+        table.add("GET", "/a/<y>", "literal first")
+        assert table.match("GET", "/a/b").value == "literal first"
+        assert table.match("GET", "/c/b").value == "blank first"
+
     def test_int_converts(self) -> None:
         """Convert digits, including a leading minus, to int."""
         table: RouteTable[str] = RouteTable()

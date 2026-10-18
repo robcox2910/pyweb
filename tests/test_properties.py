@@ -18,6 +18,7 @@ the walk-through.
 """
 
 import io
+import re
 import socket
 from http.client import HTTPResponse
 from typing import cast
@@ -29,7 +30,6 @@ from hypothesis import strategies as st
 
 from pyweb.http1 import (
     KNOWN_METHODS,
-    STATUS_REASONS,
     HttpParseError,
     Limits,
     RequestHead,
@@ -39,6 +39,7 @@ from pyweb.http1 import (
     split_target,
     wants_keep_alive,
 )
+from pyweb.messages import Headers
 from tests.strategies import header_names
 
 # The thorough profile runs 2,000 examples of each test, and shrinking a
@@ -57,7 +58,15 @@ MOST_HEADERS = 8
 # so the response round-trip starts at 200.
 FIRST_STATUS = 200
 LAST_STATUS = 599
-FIRST_ERROR_STATUS = 400
+
+# The only statuses a bad head may be refused with, as listed in
+# docs/concepts/limits-and-timeouts.md: 400 (bad request), 411 (length
+# required), 431 (headers too big), 501 (unknown method), 505 (bad version).
+REFUSALS = frozenset({400, 411, 431, 501, 505})
+BAD_REQUEST = 400
+
+# A Content-Length is 1 to 18 plain digits, the most PyWeb reads (http1.py).
+PLAIN_DIGITS = re.compile(r"[0-9]{1,18}")
 
 # Bytes that look blank but aren't a space or a tab: vertical tab, form
 # feed, \x1c, "next line" (\x85) and the no-break space (\xa0).
@@ -65,6 +74,19 @@ BLANK_LOOKALIKES = "\x0b\x0c\x1c\x85\xa0"
 
 # A damaged head gets at most this many random edits.
 MOST_EDITS = 4
+
+# Header lines that have tripped up web servers before: a folded line, two
+# framings at once, numbers too long or that disagree. Random bytes would
+# hardly ever spell one, so they're spliced into good heads on purpose.
+NASTY_LINES = [
+    " folded onto the line above",
+    "\tfolded with a tab",
+    "Transfer-Encoding: chunked",
+    "Content-Length: " + "9" * 19,
+    "Content-Length: 5, 6",
+    "Content-Length: -1",
+    "Connection: close, keep-alive",
+]
 
 # --- Strategies: recipes for random inputs -----------------------------------
 # header_names() lives in tests/strategies.py, shared with the model check.
@@ -130,11 +152,30 @@ def damaged_heads(draw: st.DrawFn) -> bytes:
     return bytes(raw)
 
 
+@st.composite
+def heads_with_a_nasty_line(draw: st.DrawFn) -> bytes:
+    """Make a good request head with one well-known troublemaker line slipped in."""
+    lines = write_head(draw(request_heads())).split(b"\r\n")
+    where = draw(st.integers(min_value=1, max_value=len(lines)))
+    lines.insert(where, draw(st.sampled_from(NASTY_LINES)).encode("latin-1"))
+    return b"\r\n".join(lines)
+
+
 def any_heads() -> st.SearchStrategy[bytes]:
     """Make any bytes at all that might arrive as a head, junk or nearly right."""
-    # Pure random bytes almost never get past the first word, so half the
-    # time start from a good head and damage it a little.
-    return st.one_of(st.binary(), damaged_heads())
+    # Pure random bytes almost never get past the first word, so most of the
+    # time start from a good head and damage it, or slip a nasty line in.
+    return st.one_of(st.binary(), damaged_heads(), heads_with_a_nasty_line())
+
+
+def content_lengths() -> st.SearchStrategy[str]:
+    """Make a Content-Length value: digits, maybe padded, maybe a comma list like ``5, 5``."""
+    # Spaces and tabs are allowed padding; the blank lookalikes are not.
+    # "²" is a digit to Python's isdigit() but not to HTTP.
+    padding = st.sampled_from(["", " ", "\t", *BLANK_LOOKALIKES])
+    digits = st.text(alphabet="0123456789²", min_size=1, max_size=20)
+    one_number = st.tuples(padding, digits, padding).map("".join)
+    return st.lists(one_number, min_size=1, max_size=3).map(",".join)
 
 
 def reason_phrases() -> st.SearchStrategy[str]:
@@ -182,6 +223,27 @@ class FakeSocket:
         return io.BytesIO(self._data)
 
 
+def length_the_slow_way(values: list[str]) -> tuple[str, int]:
+    """Work out what Content-Length values mean by the plain rules of HTTP.
+
+    Split on commas, trim spaces and tabs (and nothing else), and every piece
+    must be 1 to 18 plain digits, all the same number. Otherwise: 400.
+    """
+    pieces = [piece.strip(" \t") for value in values for piece in value.split(",")]
+    if not all(PLAIN_DIGITS.fullmatch(piece) for piece in pieces):
+        return ("refused", BAD_REQUEST)
+    numbers = {int(piece) for piece in pieces}
+    return ("length", numbers.pop()) if len(numbers) == 1 else ("refused", BAD_REQUEST)
+
+
+def length_or_refusal(head: RequestHead) -> tuple[str, int]:
+    """Ask PyWeb for the body length: ``("length", n)``, or ``("refused", status)``."""
+    try:
+        return ("length", body_length(head))
+    except HttpParseError as refusal:
+        return ("refused", refusal.status)
+
+
 def read_or_refuse(raw: bytes) -> int | None:
     """Read a head the way the server does; return the refusal's status, or None if accepted.
 
@@ -193,6 +255,7 @@ def read_or_refuse(raw: bytes) -> int | None:
         body_length(head)
         split_target(head.target)
         wants_keep_alive(head)
+        Headers(head.headers)
     except HttpParseError as refusal:
         return refusal.status
     return None
@@ -215,8 +278,15 @@ def test_request_head_written_out_reads_back_the_same(head: RequestHead) -> None
 def test_any_bytes_give_a_head_or_http_parse_error(raw: bytes) -> None:
     """Whatever bytes arrive, the server reads a head or raises HttpParseError, nothing else."""
     status = read_or_refuse(raw)
-    # A refusal is sent back as the answer, so it must be a real error status.
-    assert status is None or (status in STATUS_REASONS and status >= FIRST_ERROR_STATUS)
+    # A refusal is sent back as the answer, so it must be one the docs list.
+    assert status is None or status in REFUSALS
+
+
+@given(values=st.lists(content_lengths(), min_size=1, max_size=2))
+def test_content_length_follows_the_plain_rules(values: list[str]) -> None:
+    """PyWeb reads Content-Length exactly as the plain rules of HTTP say, or refuses it."""
+    head = RequestHead("POST", "/", "HTTP/1.1", [("Content-Length", v) for v in values])
+    assert length_or_refusal(head) == length_the_slow_way(values)
 
 
 @given(
