@@ -68,9 +68,9 @@ def _content_length(header_text: str) -> int:
         RequestRefusedError: ``400`` if the value is not 1 to 18 plain ASCII
             digits (spaces and tabs around it are fine), or if repeated
             Content-Length headers disagree (identical repeats are fine, as in
-            ``http1.body_length``). Two programs that
-            read an odd length differently could disagree about where the
-            body ends -- the trick behind "request smuggling".
+            ``http1.body_length``). Two programs
+            that read an odd length differently could disagree about where
+            the body ends -- the trick behind "request smuggling".
 
     """
     tokens: list[str] = []

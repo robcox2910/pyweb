@@ -40,7 +40,9 @@ def login(request: HttpRequest) -> HttpResponse:
 @require()
 def stage(request: HttpRequest) -> dict[str, str]:
     """Let any logged-in visitor in."""
-    return {"welcome": current_user(request).name}
+    user = current_user(request)
+    # require() has already turned strangers away, so user is set here.
+    return {"welcome": user.name if user else "friend"}
 
 
 @app.get("/backstage")
@@ -65,7 +67,9 @@ async def demo() -> None:
 
     ada = TestClient(app)
     reply = await ada.post("/login", form={"name": "ada", "password": "demo-password-not-real"})
-    print(f"Welcome back, {reply.json()['hello']}!")
+    greeting = reply.json()
+    assert isinstance(greeting, dict)  # noqa: S101 - narrows the JSON type for the demo
+    print(f"Welcome back, {greeting['hello']}!")
     print("Ada at the stage:", (await ada.get("/stage")).status)
     print("Ada backstage:", (await ada.get("/backstage")).status)
 
