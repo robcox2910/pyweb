@@ -34,19 +34,28 @@ CLIENT_TIMEOUT = 5.0
 MAX_HEADER_BYTES = 16 * 1024
 MAX_BODY_BYTES = 1024 * 1024
 
+# Only spaces and tabs pad a header value. A bare strip() would also remove
+# look-alike blanks such as "\x0b", which another server might not ignore.
+_PADDING = " \t"
+_MAX_LENGTH_DIGITS = 18
 
-class RequestTooLargeError(Exception):
-    """The client sent more than we're willing to read.
+
+class RequestRefusedError(Exception):
+    """We won't read this request; answer with a status and hang up.
 
     Args:
-        status: The HTTP status to answer with (413 or 431).
+        status: The HTTP status to answer with.
 
     """
 
     def __init__(self, status: StatusCode) -> None:
-        """Remember which "too large" status to send back."""
+        """Remember which status to send back."""
         super().__init__(STATUS_PHRASES[status])
         self.status = status
+
+
+class RequestTooLargeError(RequestRefusedError):
+    """The client sent more than we're willing to read (413 or 431)."""
 
 
 def _content_length(header_text: str) -> int:
@@ -54,14 +63,21 @@ def _content_length(header_text: str) -> int:
 
     Content-Length is the sender writing "this letter is N pages long"
     on the envelope so we know when we've read the whole thing.
+
+    Raises:
+        RequestRefusedError: ``400`` if the value is not 1 to 18 plain ASCII
+            digits (spaces and tabs around it are fine). Two programs that
+            read an odd length differently could disagree about where the
+            body ends -- the trick behind "request smuggling".
+
     """
     for line in header_text.replace("\r\n", "\n").split("\n"):
         name, sep, value = line.partition(":")
-        if sep and name.strip().lower() == "content-length":
-            try:
-                return int(value.strip())
-            except ValueError:
-                return 0
+        if sep and name.strip(_PADDING).lower() == "content-length":
+            digits = value.strip(_PADDING)
+            if not (digits.isascii() and digits.isdigit() and len(digits) <= _MAX_LENGTH_DIGITS):
+                raise RequestRefusedError(StatusCode.BAD_REQUEST)
+            return int(digits)
     return 0
 
 
@@ -255,7 +271,7 @@ class Server:
         try:
             try:
                 raw = _read_request(conn)
-            except RequestTooLargeError as exc:
+            except RequestRefusedError as exc:
                 status = exc.status
                 page = html_response(f"<h1>{status} {exc}</h1>", status=status)
                 conn.sendall(page.to_bytes())

@@ -61,6 +61,12 @@ class TestParseHeaders:
         assert req.headers["Host"] == "example.com"
         assert req.headers["Accept"] == "text/html"
 
+    def test_only_spaces_and_tabs_are_trimmed(self) -> None:
+        """Trim spaces and tabs around a header, but keep look-alike blanks."""
+        raw = "GET / HTTP/1.1\r\n\tContent-Length: 0\x0b\r\n\r\n"
+        req = parse_request(raw)
+        assert req.headers["Content-Length"] == "0\x0b"
+
     def test_header_with_colon_in_value(self) -> None:
         """Header values containing colons should parse correctly."""
         raw = "GET / HTTP/1.1\r\nAuth: Bearer token:abc:123\r\n\r\n"
