@@ -68,8 +68,8 @@ async def demo() -> None:
     ada = TestClient(app)
     reply = await ada.post("/login", form={"name": "ada", "password": "demo-password-not-real"})
     greeting = reply.json()
-    assert isinstance(greeting, dict)  # narrows the JSON type
-    print(f"Welcome back, {greeting['hello']}!")
+    if isinstance(greeting, dict):
+        print(f"Welcome back, {greeting['hello']}!")
     print("Ada at the stage:", (await ada.get("/stage")).status)
     print("Ada backstage:", (await ada.get("/backstage")).status)
 
