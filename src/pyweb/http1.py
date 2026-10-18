@@ -157,7 +157,7 @@ def body_length(head: RequestHead) -> int:
         raise _fail(_LENGTH_REQUIRED, "Transfer-Encoding is not supported")
     if not lengths:
         return 0
-    # Only spaces and tabs are padding (RFC 9110 section 5.6.1). A bare
+    # Only spaces and tabs are padding (RFC 9110 section 5.6.3). A bare
     # strip() would also eat \x0b, \x85 and friends, and accept "0\x0b".
     tokens = [t.strip(_PADDING) for value in lengths for t in value.split(",")]
     if not all(t.isascii() and t.isdigit() and len(t) <= _MAX_LENGTH_DIGITS for t in tokens):

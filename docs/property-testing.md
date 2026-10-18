@@ -13,9 +13,8 @@ and path `/about`. That's an **example test**. It's useful, but it only
 tells you about the one letter you thought of.
 
 Now imagine a post office inspector. All day long they post thousands of
-letters: tidy ones, scruffy ones, letters with stickers in Greek, letters
-with the same sticker stuck on three times, and letters that are just a
-handful of torn-up confetti. For each one they check a single rule:
+letters: tidy ones, scruffy ones, ones with stickers in Greek, and ones
+that are just torn-up confetti. For each one they check a single rule:
 
 > Whatever letter you post, the sorting room reads exactly what's
 > written on it -- and if it can't read it, it says so in the one way the
@@ -27,9 +26,9 @@ looks like. It says something that must be true for *every* letter.
 When the inspector finds a letter that breaks the rule, they don't just
 report "something in this morning's sacks went wrong". They try again
 with less and less -- fewer stickers, shorter addresses -- checking it
-still goes wrong each time, until it's as simple as it can be. That boiling-down is called **shrinking**, and it's
-the best part: the smallest failing letter usually points straight at
-the bug.
+still goes wrong each time, until it's as simple as it can be. That
+boiling-down is called **shrinking**, and it's the best part: the
+smallest failing letter usually points straight at the bug.
 
 In Python, the inspector is a library called
 [Hypothesis](https://hypothesis.readthedocs.io/). PyWeb's property tests
@@ -56,9 +55,6 @@ def versions() -> st.SearchStrategy[str]:
 
 def targets() -> st.SearchStrategy[str]:
     """Make any request target: one word of any bytes, with no space, CR, LF or NUL."""
-    # The request line is three words split by single spaces, so a target
-    # can't hold a space; CR, LF and NUL are refused anywhere in a head.
-    # The head is read as latin-1, so every character is one byte (1-255).
     letters = st.characters(min_codepoint=1, max_codepoint=0xFF, exclude_characters=" \r\n")
     return st.text(alphabet=letters, min_size=1)
 
@@ -102,13 +98,13 @@ Line by line:
 
 - **`methods()`, `versions()`, `targets()` and `header_values()`** are
   **strategies**: recipes for making random inputs, each named for what
-  it makes. `targets()` makes any address at all -- `/`, `/a?b=c`,
-  `º*\x83` -- as long as it's one word. `header_names()` (in
+  it makes. `targets()` makes any address at all -- `/`, `/a?b=c`, odd
+  symbols like `º*` -- as long as it's one word. `header_names()` (in
   `tests/strategies.py`, shared with the model check) makes any legal
   header name, and mixes in ones PyWeb reads itself, like
   `Content-Length`.
-- **`trim_spaces`** is there because HTTP (RFC 9110, section 5.5) says
-  spaces and tabs around a value are padding: `X-A:  b  ` *means* `b`.
+- **`trim_spaces`** is there because HTTP's rules say spaces and tabs
+  around a value are padding: `X-A:  b  ` *means* `b`.
   So the strategy only makes values that can come back unchanged.
 - **`ends`** is the inspector being sneaky. Form feed or `\xa0` (a
   no-break space) *look* blank, but they aren't padding, so the sorting
@@ -116,37 +112,40 @@ Line by line:
 - **`request_heads()`** builds a whole `RequestHead` with up to 8
   headers. Two can share a name, or differ only in capitals.
 - **`write_head`** writes the letter out by hand, one line per piece.
-- **`@given(head=request_heads())`** tells Hypothesis to run the test
-  many times (100 in a normal run), each time with a fresh `head`.
-- **The docstring** says the rule in plain English. If you can't say the
-  rule in one sentence, it probably isn't a good property yet.
+- **`@given(head=request_heads())`** runs the test many times (100 in a
+  normal run), each with a fresh `head`. **The docstring** says the rule
+  in one plain sentence.
 - **The first `assert`** is the rule itself: write it out, read it back,
   and you must get exactly what you started with. This kind of property
   is called a **round-trip**.
 - **The second `assert`** compares `repr()`s too (the text you'd type to
-  make each value), a belt-and-braces check on types, order and capitals.
+  make each value), an extra check that types, order and capitals match.
 
 Notice what the test *doesn't* say. It never says "the bytes
 `GET / HTTP/1.1` give method `GET`". It doesn't need to know any
 answers. It only needs a rule that's always true.
 
-PyWeb has three more properties:
+PyWeb also has a property that any bytes at all give a head or an
+`HttpParseError`. The server answers bad letters by catching that error
+and sending back its status, so any other error would crash the
+connection. There's a catch, though. **A sorting room that refuses
+every letter passes the "any bytes" property**, because refusing is
+always allowed. The round-trip sits beside it: it fails straight away
+if a good letter is ever refused.
+
+Here are all the other properties:
 
 | Rule | Test |
 |---|---|
-| Whatever bytes arrive, the server reads a head or raises `HttpParseError` with a real error status, nothing else | `test_any_bytes_give_a_head_or_http_parse_error` |
+| Whatever bytes arrive, the server reads a head or refuses it with a status the docs list (`400`, `411`, `431`, `501`, `505`), nothing else | `test_any_bytes_give_a_head_or_http_parse_error` |
+| PyWeb reads `Content-Length` exactly as the plain rules of HTTP say, or refuses it | `test_content_length_follows_the_plain_rules` |
 | Python's own `http.client` reads back every status, reason and header PyWeb writes in a reply | `test_response_head_reads_back_with_the_standard_library` |
 | A path and query escaped by Python's `urllib` split back into exactly what went in | `test_quoted_target_splits_back_into_path_and_query` |
 
-The first one matters because the server answers bad letters by
-catching `HttpParseError` and sending back its status (`400`, `505`...).
-Any other error would crash that connection instead. Its strategy posts
-pure random bytes, or a good head with a few bytes snipped or spliced in.
-
-There's a catch, though. **A sorting room that refuses every letter
-passes the "any bytes" property**, because refusing is always allowed.
-The round-trip sits beside it: it fails straight away if a good letter
-is ever refused.
+The "any bytes" strategy posts pure random bytes, a good head with a few
+bytes snipped or spliced in, or a good head with a known troublemaker
+line slipped in (a folded line, a 19-digit `Content-Length`,
+`Transfer-Encoding`).
 
 ## Checking Against a Model
 
@@ -154,12 +153,9 @@ A property checks one action. But the mailroom is something you set up
 step by step: add a route, add another, look a path up. Bugs often hide
 in the *order* of steps, or in two routes that both fit the same path.
 
-So the inspector has a second trick. They carry a notebook with every
-route written in it, in the order it was added. To look up a path, they
-do it the slow, obvious way: find every route in the notebook whose
-pattern fits, put the most specific first, and take the first one with
-the right method. After every step, they check the mailroom gives the
-same answer as the notebook.
+So the inspector carries a notebook with every route written in it, in
+the order it was added, and looks paths up the slow, obvious way. After
+every step, the mailroom must give the same answer as the notebook.
 
 That notebook is a **model**: something simple that we already trust.
 Here's the heart of `RouteMachine` in `tests/test_model.py`:
@@ -217,8 +213,9 @@ Piece by piece:
   which route, which parameters, and -- when nothing fits -- the methods
   that would have (none means `404`, some means `405`). The notebook's
   side, `expected`, turns each pattern into a regular expression, keeps
-  the ones that fit, and uses `sorted()` so literal pieces beat blanks
-  and, between equals, the first one added wins.
+  the ones that fit, and uses `sorted()` to apply the rule written in
+  [Routing](concepts/routing.md#which-route-wins): literal pieces beat
+  blanks, earlier routes win ties.
 - **Each `@rule`** is one kind of step. `add_route` adds a route to both,
   and checks what `add` *says*: `None` for a new route, a `ValueError`
   for a repeat. The real file has rules to add a route again, look up
@@ -237,14 +234,15 @@ Piece by piece:
 
 Paths and patterns come from a tiny alphabet (`a`, `b`, `7`, `-2`,
 nineteen `9`s and the empty piece), so they bump into each other all
-the time. `RouteTable` can't remove a route, so the stories only add and
-look up.
+the time.
 
 The list is a good model because it's obviously right and it's *not*
-`RouteTable`'s code. `RouteTable` walks a path segment by segment;
-the notebook uses regular expressions and `sorted()`. If we built the
-model by copying `RouteTable`, any bug would be in both, and they'd
-agree perfectly about the wrong answer.
+`RouteTable`'s code. Both follow the same documented rule about which
+route wins -- that's the rule they must agree on -- but the notebook
+writes it down its own way: regular expressions and `sorted()`, where
+`RouteTable` walks a path piece by piece. If we built the model by
+copying `RouteTable`, any bug would be in both, and they'd agree
+perfectly about the wrong answer.
 
 A second machine, `HeadersMachine`, adds, sets and removes headers in
 random capitals (`Host`, `hOsT`) on `Headers` and on a plain list of
@@ -273,10 +271,8 @@ Hypothesis reports this (trimmed to the interesting part):
 
 ```
     def check(self, method: str, path: str) -> None:
-        """Look a path up in both and check they give the same answer."""
         found = self.table.match(method, path)
         value, params, allowed = self.expected(method, path)
-        # repr tells 7 from "7", so it checks <int:...> really gave an int.
 >       assert (found.value, repr(found.params), found.allowed) == (value, repr(params), allowed)
 E       assert (0, "{'p0': ''}", frozenset()) == (None, '{}', set())
 E         At index 0 diff: 0 != None
@@ -307,6 +303,54 @@ Put the line back to `if not part:` and run the tests again. They pass.
 !!! tip "Older Hypothesis versions"
     Older versions of Hypothesis print `Falsifying example:` instead of
     `Failing test case:`. It means the same thing.
+
+## A Bug We Found
+
+This one was found by a person, not the inspector: a reviewer reading
+`body_length` spotted a bare `.strip()`. We then wrote
+`test_content_length_follows_the_plain_rules`, and on the old code the
+inspector found it straight away:
+
+```
+E       AssertionError: assert ('length', 0) == ('refused', 400)
+E       Failing test case: test_content_length_follows_the_plain_rules(
+E           values=['0\x0b'],
+E       )
+```
+
+`Content-Length: 0` followed by a **vertical tab** (`\x0b`) was read as
+`0`. It should be refused with `400`.
+
+HTTP says only spaces and tabs are padding, but Python's `.strip()`
+removes *every* kind of blank. So PyWeb ignored bytes another server
+might not, and two programs disagreeing about where a body ends is the
+trick behind request smuggling (see
+[Limits and Timeouts](concepts/limits-and-timeouts.md#tricky-requests)).
+
+The example tests tried `"abc"`, `"-1"` and `"5 5"`, but nobody thought
+of a blank that isn't a space. The property's strategy makes them on
+purpose.
+
+The fix was to trim only spaces and tabs (in `wants_keep_alive` too):
+
+```python
+    tokens = [t.strip(_PADDING) for value in lengths for t in value.split(",")]  # was: t.strip()
+```
+
+where `_PADDING = " \t"`. The shrunk input is now an ordinary example
+test in `tests/aio/test_http1.py`:
+
+```python
+    def test_blank_lookalike_padding_is_400(self) -> None:
+        """Reject ``0`` padded with a vertical tab: only spaces and tabs are padding."""
+        # Found in review; the Content-Length property shrinks to this input.
+        with pytest.raises(HttpParseError) as info:
+            body_length(head([("Content-Length", "0\x0b")]))
+        assert info.value.status == BAD_REQUEST
+```
+
+The property didn't *find* this bug, but now it guards against it and
+every other padding or digit mix-up its strategy can make.
 
 ## Run It Yourself
 
