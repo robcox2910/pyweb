@@ -10,6 +10,8 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+import pytest
+
 from pyweb.request import Request
 from pyweb.response import Response, text_response
 from pyweb.router import Router
@@ -187,6 +189,25 @@ class TestServerSurvivesBadClients:
                 b"POST / HTTP/1.1\r\nContent-Length: 999999999\r\n\r\nhi",
             )
             assert reply.startswith(b"HTTP/1.1 413")
+
+    @pytest.mark.parametrize("length", ["0\x0b", "1_0", "²"])
+    def test_odd_content_length_is_refused_with_400(self, length: str) -> None:
+        """Only plain ASCII digits, padded with spaces or tabs, make a Content-Length.
+
+        Regression: ``int(value.strip())`` accepted a vertical tab, an
+        underscore and a superscript two, the same smuggling bug the async
+        server's ``body_length`` had.
+        """
+        with _running_server() as server:
+            head = f"GET / HTTP/1.1\r\nContent-Length: {length}\r\n\r\n"
+            reply = _send(server, head.encode())
+            assert reply.startswith(b"HTTP/1.1 400")
+
+    def test_content_length_padded_with_a_tab_is_fine(self) -> None:
+        """Spaces and tabs around the number are allowed padding."""
+        with _running_server() as server:
+            reply = _send(server, b"GET / HTTP/1.1\r\nContent-Length:\t0 \r\n\r\n")
+            assert reply.startswith(b"HTTP/1.1 200")
 
     def test_port_zero_picks_a_free_port(self) -> None:
         """Asking for port 0 lets the operating system pick, and we report it."""

@@ -12,3 +12,4 @@ htmlcov/
 src/pyweb/_version.py
 site/
 .superpowers/
+.hypothesis/

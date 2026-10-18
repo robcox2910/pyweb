@@ -166,6 +166,13 @@ class TestBodyLength:
             body_length(head(headers))
         assert info.value.status == BAD_REQUEST
 
+    def test_blank_lookalike_padding_is_400(self) -> None:
+        """Reject ``0`` padded with a vertical tab: only spaces and tabs are padding."""
+        # Found in review; the Content-Length property shrinks to this input.
+        with pytest.raises(HttpParseError) as info:
+            body_length(head([("Content-Length", "0\x0b")]))
+        assert info.value.status == BAD_REQUEST
+
     def test_te_and_cl_is_400(self) -> None:
         """Reject both framings with 400."""
         headers = [("Content-Length", "5"), ("Transfer-Encoding", "chunked")]
@@ -216,6 +223,8 @@ class TestKeepAlive:
             ("HTTP/1.0", [("Connection", "keep-alive")], True),
             ("HTTP/1.0", [("Connection", "Upgrade, Keep-Alive")], True),
             ("HTTP/1.0", [("Connection", "close")], False),
+            # Only spaces and tabs are padding, as in Content-Length.
+            ("HTTP/1.0", [("Connection", "keep-alive\x0b")], False),
         ],
     )
     def test_table(self, version: str, headers: list[tuple[str, str]], expected: bool) -> None:

@@ -60,6 +60,7 @@ nav:
   - Templates: concepts/templates.md
   - Testing Apps: concepts/testing-apps.md
   - WebSockets in PyWeb: concepts/websockets-in-pyweb.md
+  - Property Testing: property-testing.md
   # series-nav:start
   - The series:
       - Series home: https://robcox2910.github.io/

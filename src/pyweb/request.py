@@ -26,6 +26,9 @@ from pyweb.errors import ParseError
 # HTTP methods we support.
 VALID_METHODS = frozenset({"GET", "POST", "PUT", "DELETE", "PATCH"})
 
+# The characters HTTP treats as padding around a header value.
+_PADDING = " \t"
+
 
 @dataclass(frozen=True)
 class Request:
@@ -130,13 +133,15 @@ def parse_request(raw: str) -> Request:
                 query_params[unquote_plus(pair)] = ""
 
     # Parse headers.
+    # Only spaces and tabs are padding; look-alike blanks such as "\x0b" are
+    # kept, so nobody can hide one inside a value like Content-Length.
     headers: dict[str, str] = {}
     for line in lines[1:]:
-        if not line.strip():
+        if not line.strip(_PADDING):
             continue
         if ":" in line:
             key, value = line.split(":", maxsplit=1)
-            headers[key.strip()] = value.strip()
+            headers[key.strip(_PADDING)] = value.strip(_PADDING)
 
     return Request(
         method=method,

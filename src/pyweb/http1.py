@@ -49,6 +49,7 @@ _MAX_LENGTH_DIGITS = 18
 _SUPPORTED_VERSIONS = frozenset({"HTTP/1.0", "HTTP/1.1"})
 _TOKEN_CHARS = frozenset(string.ascii_letters + string.digits + "!#$%&'*+-.^_`|~")
 _LINE_BANNED = frozenset("\r\n\x00")
+_PADDING = " \t"
 _MIN_STATUS = 100
 _MAX_STATUS = 599
 
@@ -110,7 +111,7 @@ def _parse_header_line(line: str) -> tuple[str, str]:
         raise _fail(_BAD_REQUEST, "malformed header line")
     if not all(ch in _TOKEN_CHARS for ch in name):
         raise _fail(_BAD_REQUEST, "invalid header name")
-    return name, value.strip(" \t")
+    return name, value.strip(_PADDING)
 
 
 def parse_head(raw: bytes, limits: Limits) -> RequestHead:
@@ -156,7 +157,9 @@ def body_length(head: RequestHead) -> int:
         raise _fail(_LENGTH_REQUIRED, "Transfer-Encoding is not supported")
     if not lengths:
         return 0
-    tokens = [t.strip() for value in lengths for t in value.split(",")]
+    # Only spaces and tabs are padding (RFC 9110 section 5.6.3). A bare
+    # strip() would also eat \x0b, \x85 and friends, and accept "0\x0b".
+    tokens = [t.strip(_PADDING) for value in lengths for t in value.split(",")]
     if not all(t.isascii() and t.isdigit() and len(t) <= _MAX_LENGTH_DIGITS for t in tokens):
         raise _fail(_BAD_REQUEST, "invalid Content-Length")
     if len({int(t) for t in tokens}) != 1:
@@ -179,7 +182,8 @@ def split_target(target: str) -> tuple[str, list[tuple[str, str]]]:
 
 def wants_keep_alive(head: RequestHead) -> bool:
     """Return whether the connection should stay open after this request."""
-    tokens = {t.strip().lower() for value in _values(head, "connection") for t in value.split(",")}
+    values = _values(head, "connection")
+    tokens = {t.strip(_PADDING).lower() for value in values for t in value.split(",")}
     if head.version == "HTTP/1.1":
         return "close" not in tokens
     return "keep-alive" in tokens and "close" not in tokens

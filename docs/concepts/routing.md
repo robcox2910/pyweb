@@ -74,6 +74,36 @@ def get_user(request):
 
 Visiting `/users/42` sets `request.params["id"]` to `"42"`.
 
+## Which Route Wins?
+
+The `Router` above checks its routes in order and takes the first that
+fits. The `App` (see [The Async Server](async-server.md)) keeps its
+routes in a `RouteTable`, which is a little smarter when two routes fit
+the same path. It follows two rules:
+
+1. **Literal pieces beat blanks.** Compare the two patterns piece by
+   piece from the left. At the first place where one has plain text and
+   the other has a blank like `<name>`, the plain text wins.
+2. **Earlier routes win ties.** If neither is more specific, the one
+   added first wins.
+
+```python
+from pyweb.routing import RouteTable
+
+table = RouteTable()
+table.add("GET", "/users/<name>", "any user")
+table.add("GET", "/users/me", "just me")
+table.add("GET", "/<section>/new", "new thing")
+
+print(table.match("GET", "/users/me").value)   # just me: "me" beats <name>
+print(table.match("GET", "/users/bob").value)  # any user
+print(table.match("GET", "/users/new").value)  # any user: "users" beats <section>
+```
+
+When nothing fits, the answer is `404`. When the path fits but only for
+other methods, it's `405`, and the answer lists those methods (a `GET`
+route answers `HEAD` too).
+
 ## What We Test
 
 - Routes match by method AND path.
