@@ -209,6 +209,41 @@ class TestServerSurvivesBadClients:
             reply = _send(server, b"GET / HTTP/1.1\r\nContent-Length:\t0 \r\n\r\n")
             assert reply.startswith(b"HTTP/1.1 200")
 
+    def test_conflicting_duplicate_content_lengths_are_refused_with_400(self) -> None:
+        """Two Content-Length headers that disagree are ambiguous framing, so refuse.
+
+        Regression: the legacy server used the first one while ``parse_request``
+        kept the last, so the two parsers could disagree about where the body ends.
+        """
+        with _running_server() as server:
+            head = b"GET / HTTP/1.1\r\nContent-Length: 0\r\nContent-Length: 5\r\n\r\nhello"
+            assert _send(server, head).startswith(b"HTTP/1.1 400")
+
+    def test_identical_duplicate_content_lengths_are_accepted(self) -> None:
+        """Repeating the same length is harmless, as in ``http1.body_length``."""
+        with _running_server() as server:
+            head = b"GET / HTTP/1.1\r\nContent-Length: 0\r\nContent-Length: 0\r\n\r\n"
+            assert _send(server, head).startswith(b"HTTP/1.1 200")
+
+    def test_comma_list_of_equal_content_lengths_is_accepted(self) -> None:
+        """``0, 0`` is one length said twice, which ``body_length`` also accepts."""
+        with _running_server() as server:
+            reply = _send(server, b"GET / HTTP/1.1\r\nContent-Length: 0, 0\r\n\r\n")
+            assert reply.startswith(b"HTTP/1.1 200")
+
+    def test_comma_list_of_different_content_lengths_is_refused(self) -> None:
+        """``0, 5`` is ambiguous framing, so refuse it."""
+        with _running_server() as server:
+            reply = _send(server, b"GET / HTTP/1.1\r\nContent-Length: 0, 5\r\n\r\n")
+            assert reply.startswith(b"HTTP/1.1 400")
+
+    @pytest.mark.parametrize("second", ["0\x0b", "²"])
+    def test_bad_second_duplicate_content_length_is_refused(self, second: str) -> None:
+        """Every repeated Content-Length must be plain digits, not just the first."""
+        with _running_server() as server:
+            head = f"GET / HTTP/1.1\r\nContent-Length: 0\r\nContent-Length: {second}\r\n\r\n"
+            assert _send(server, head.encode()).startswith(b"HTTP/1.1 400")
+
     def test_port_zero_picks_a_free_port(self) -> None:
         """Asking for port 0 lets the operating system pick, and we report it."""
         with _running_server() as server:

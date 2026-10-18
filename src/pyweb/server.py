@@ -66,19 +66,25 @@ def _content_length(header_text: str) -> int:
 
     Raises:
         RequestRefusedError: ``400`` if the value is not 1 to 18 plain ASCII
-            digits (spaces and tabs around it are fine). Two programs that
-            read an odd length differently could disagree about where the
-            body ends -- the trick behind "request smuggling".
+            digits (spaces and tabs around it are fine), or if repeated or
+            comma-separated Content-Length values disagree (identical repeats
+            are fine, as in ``http1.body_length``). Two programs that read an
+            odd length differently could disagree about where the body ends --
+            the trick behind "request smuggling".
 
     """
+    tokens: list[str] = []
     for line in header_text.replace("\r\n", "\n").split("\n"):
         name, sep, value = line.partition(":")
         if sep and name.strip(_PADDING).lower() == "content-length":
-            digits = value.strip(_PADDING)
-            if not (digits.isascii() and digits.isdigit() and len(digits) <= _MAX_LENGTH_DIGITS):
-                raise RequestRefusedError(StatusCode.BAD_REQUEST)
-            return int(digits)
-    return 0
+            tokens.extend(t.strip(_PADDING) for t in value.split(","))
+    if not tokens:
+        return 0
+    if not all(t.isascii() and t.isdigit() and len(t) <= _MAX_LENGTH_DIGITS for t in tokens):
+        raise RequestRefusedError(StatusCode.BAD_REQUEST)
+    if len({int(t) for t in tokens}) != 1:
+        raise RequestRefusedError(StatusCode.BAD_REQUEST)
+    return int(tokens[0])
 
 
 def _read_request(conn: socket.socket) -> str:
