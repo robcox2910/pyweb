@@ -313,13 +313,37 @@ class TestBearerVerifier:
 
         def boom(_token: str) -> User | None:
             """Fail every time."""
-            msg = "verifier broke"
-            raise RuntimeError(msg)
+            raise KeyError(LEAKY_STAMP)
 
         client = TestClient(build(bearer_verifier=boom).app)
         with caplog.at_level(logging.ERROR, logger="pyweb.auth"):
             response = go(client.get("/jobs", headers=_bearer(LEAKY_STAMP)))
         assert response.status == UNAUTHORIZED
-        errors = [r for r in caplog.records if r.name == "pyweb.auth"]
-        assert errors
-        assert all(LEAKY_STAMP not in r.getMessage() for r in errors)
+        assert [r for r in caplog.records if r.name == "pyweb.auth"]
+        assert "KeyError" in caplog.text
+        assert LEAKY_STAMP not in caplog.text
+
+    def test_empty_bearer_skips_verifier(self) -> None:
+        """Treat an empty bearer as anonymous without asking the verifier."""
+        seen: list[str] = []
+
+        def spy(token: str) -> User | None:
+            """Record every token asked about."""
+            seen.append(token)
+            return None
+
+        client = TestClient(build(bearer_verifier=spy).app)
+        assert go(client.get("/jobs", headers={"Authorization": "Bearer "})).status == UNAUTHORIZED
+        assert seen == []
+
+    def test_bearer_post_with_cookie_needs_no_csrf(self) -> None:
+        """Let a verified bearer POST through even beside a valid cookie."""
+        client = TestClient(build(bearer_verifier=_ci_verifier).app)
+        go(log_in(client))
+        assert go(client.post("/jobs", headers=_bearer(CI_STAMP))).status == OK
+
+    def test_bad_bearer_with_cookie_post_is_401_not_csrf(self) -> None:
+        """Answer 401 (not a CSRF 403) to a bad bearer POST with a valid cookie."""
+        client = TestClient(build(bearer_verifier=_ci_verifier).app)
+        go(log_in(client))
+        assert go(client.post("/jobs", headers=_bearer(BAD_STAMP))).status == UNAUTHORIZED

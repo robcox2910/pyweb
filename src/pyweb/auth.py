@@ -248,7 +248,10 @@ class SessionAuth:
                 tokens: given the token text, return the ``User`` it
                 names, or None. It is tried first; on None the signed
                 API token check runs. If it raises, the error is logged
-                (never the token) and the visitor is anonymous.
+                (type only, never the token) and the visitor is anonymous.
+                It runs on the event loop, so keep it a cheap in-memory
+                lookup: no I/O, no slow hashing. An empty token is
+                anonymous without calling it.
 
         """
         self._bearer_verifier = bearer_verifier
@@ -313,10 +316,16 @@ class SessionAuth:
         """
         bearer = _bearer_token(request)
         if bearer is not None:
+            if not bearer:
+                return None, None
             try:
                 user = self._verify_bearer(bearer)
-            except Exception:
-                logger.exception("Bearer verifier raised; treating the visitor as anonymous")
+            except Exception as exc:  # noqa: BLE001 - never trust a user callback
+                # Type only: the message may hold the token (e.g. KeyError(token)).
+                logger.error(  # noqa: TRY400
+                    "Bearer verifier raised %s; treating the visitor as anonymous",
+                    type(exc).__name__,
+                )
                 return None, None
             if user is None:
                 user, _ = self._user_from(bearer, _API_KIND)

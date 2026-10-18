@@ -129,8 +129,10 @@ token text and returns the `User` it belongs to, or `None` if it does not
 know the token. It is asked first; if it says `None`, PyWeb still tries
 its own signed API tokens. Bearer requests never need a CSRF token, and
 a bad one makes the visitor a stranger even with a good cookie. If your
-function breaks, PyWeb logs it (without the token) and treats the visitor
-as a stranger instead of showing a 500.
+function breaks, PyWeb logs the error type (never the token or message) and treats the visitor
+as a stranger instead of showing a 500. The function runs on the event
+loop, so keep it a quick in-memory lookup: no files, no network, no slow
+password hashing.
 
 ```python
 from pynet.loop import run

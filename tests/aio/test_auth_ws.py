@@ -1,6 +1,7 @@
 """Tests for require() on its own and for auth on WebSocket routes."""
 
 import inspect
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -8,7 +9,7 @@ from pynet.ws import WebSocket, client_handshake_request
 
 from pyweb.app import App, WebSocketUpgrade
 from pyweb.aserver import AsyncServer
-from pyweb.auth import InMemoryUsers, SessionAuth, _required_roles, current_user, require
+from pyweb.auth import InMemoryUsers, SessionAuth, User, _required_roles, current_user, require
 from pyweb.messages import Headers, HTTPError, HttpRequest, HttpResponse, QueryParams
 from pyweb.security import SessionSigner
 from tests.aio._auth_helpers import ADA_WORD, BOB_WORD, DEMO_KEY, ROUNDS, go
@@ -104,12 +105,20 @@ class TestRequireDecorator:
         assert caught.value.status == UNAUTHORIZED
 
 
-def ws_app(allowed_origins: tuple[str, ...] = ()) -> tuple[App, SessionAuth, InMemoryUsers]:
+def ws_app(
+    allowed_origins: tuple[str, ...] = (),
+    bearer_verifier: Callable[[str], User | None] | None = None,
+) -> tuple[App, SessionAuth, InMemoryUsers]:
     """Build an app whose WebSocket route needs the admin role."""
     users = InMemoryUsers()
     users.add("ada", ADA_WORD, roles=("admin",), rounds=ROUNDS)
     users.add("bob", BOB_WORD, rounds=ROUNDS)
-    auth = SessionAuth(SessionSigner(DEMO_KEY), users, allowed_origins=allowed_origins)
+    auth = SessionAuth(
+        SessionSigner(DEMO_KEY),
+        users,
+        allowed_origins=allowed_origins,
+        bearer_verifier=bearer_verifier,
+    )
     app = App()
     app.middleware(auth)
 
@@ -239,6 +248,20 @@ class TestWebSocketOrigin:
         line = f"Authorization: Bearer {auth.api_token(ada)}\r\n"
         reply, _ = serve(app, lambda s: greeted(s, handshake(line)))
         assert reply.status == SWITCHING
+
+    def test_verifier_user_upgrade_follows_roles(self) -> None:
+        """Put through a verified admin and refuse a verified non-admin, with no Origin."""
+
+        def verify(token: str) -> User | None:
+            """Know one admin and one plain user."""
+            roles = {"adm": frozenset({"admin"}), "plain": frozenset[str]()}
+            return User(token, "", roles[token]) if token in roles else None
+
+        app, _, _ = ws_app(bearer_verifier=verify)
+        good, _ = serve(app, lambda s: greeted(s, handshake("Authorization: Bearer adm\r\n")))
+        bad = serve(app, lambda s: status_of(s, handshake("Authorization: Bearer plain\r\n")))
+        assert good.status == SWITCHING
+        assert bad == FORBIDDEN
 
     def test_cookie_on_open_route_is_checked_too(self) -> None:
         """Refuse a cross-site cookie upgrade even to a route with no require."""
