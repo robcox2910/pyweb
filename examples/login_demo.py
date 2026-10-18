@@ -70,6 +70,8 @@ async def demo() -> None:
     greeting = reply.json()
     if isinstance(greeting, dict):
         print(f"Welcome back, {greeting['hello']}!")
+    else:
+        print("Unexpected login reply:", greeting)
     print("Ada at the stage:", (await ada.get("/stage")).status)
     print("Ada backstage:", (await ada.get("/backstage")).status)
 
