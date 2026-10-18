@@ -209,6 +209,22 @@ class TestServerSurvivesBadClients:
             reply = _send(server, b"GET / HTTP/1.1\r\nContent-Length:\t0 \r\n\r\n")
             assert reply.startswith(b"HTTP/1.1 200")
 
+    def test_conflicting_duplicate_content_lengths_are_refused_with_400(self) -> None:
+        """Two Content-Length headers that disagree are ambiguous framing, so refuse.
+
+        Regression: the legacy server used the first one while ``parse_request``
+        kept the last, so the two parsers could disagree about where the body ends.
+        """
+        with _running_server() as server:
+            head = b"GET / HTTP/1.1\r\nContent-Length: 0\r\nContent-Length: 5\r\n\r\nhello"
+            assert _send(server, head).startswith(b"HTTP/1.1 400")
+
+    def test_identical_duplicate_content_lengths_are_accepted(self) -> None:
+        """Repeating the same length is harmless, as in ``http1.body_length``."""
+        with _running_server() as server:
+            head = b"GET / HTTP/1.1\r\nContent-Length: 0\r\nContent-Length: 0\r\n\r\n"
+            assert _send(server, head).startswith(b"HTTP/1.1 200")
+
     def test_port_zero_picks_a_free_port(self) -> None:
         """Asking for port 0 lets the operating system pick, and we report it."""
         with _running_server() as server:
