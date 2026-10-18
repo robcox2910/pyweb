@@ -1,5 +1,7 @@
 """Tests for session auth, roles and CSRF protection over the TestClient."""
 
+import logging
+
 import pytest
 
 from pyweb.auth import (
@@ -263,3 +265,61 @@ class TestUsers:
         )
         assert response.status == SEE_OTHER
         assert response.headers.get("Location") == "/"
+
+
+CI_STAMP = "tok"
+BAD_STAMP = "nope"
+LEAKY_STAMP = "sekret-token-text"
+
+
+def _ci_verifier(token: str) -> User | None:
+    """Accept only ``CI_STAMP``, as a viewer called ci."""
+    return User("ci", "", frozenset({"viewer"})) if token == CI_STAMP else None
+
+
+def _bearer(token: str) -> dict[str, str]:
+    """Return an Authorization header carrying this token."""
+    return {"Authorization": f"Bearer {token}"}
+
+
+class TestBearerVerifier:
+    """Test the pluggable bearer-token verifier."""
+
+    def test_bearer_verifier_user(self) -> None:
+        """Let a verified user through viewer doors and refuse admin ones."""
+        client = TestClient(build(bearer_verifier=_ci_verifier).app)
+        assert go(client.get("/viewer", headers=_bearer(CI_STAMP))).status == OK
+        assert go(client.get("/admin", headers=_bearer(CI_STAMP))).status == FORBIDDEN
+
+    def test_bearer_verifier_none_falls_back(self) -> None:
+        """Still accept a signed API token when the verifier says None."""
+        site = build(bearer_verifier=_ci_verifier)
+        ada = site.users.get("ada")
+        assert ada is not None
+        response = go(TestClient(site.app).get("/admin", headers=_bearer(site.auth.api_token(ada))))
+        assert response.status == OK
+
+    def test_bearer_skips_csrf_and_cookie(self) -> None:
+        """Skip CSRF for a bearer POST, and ignore a good cookie beside a bad bearer."""
+        site = build(bearer_verifier=_ci_verifier)
+        client = TestClient(site.app)
+        assert go(client.post("/jobs", headers=_bearer(CI_STAMP))).status == OK
+        go(log_in(client))
+        assert go(client.get("/jobs")).status == OK
+        assert go(client.get("/jobs", headers=_bearer(BAD_STAMP))).status == UNAUTHORIZED
+
+    def test_verifier_exception_is_anonymous(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Log a raising verifier without the token and treat the visitor as anonymous."""
+
+        def boom(_token: str) -> User | None:
+            """Fail every time."""
+            msg = "verifier broke"
+            raise RuntimeError(msg)
+
+        client = TestClient(build(bearer_verifier=boom).app)
+        with caplog.at_level(logging.ERROR, logger="pyweb.auth"):
+            response = go(client.get("/jobs", headers=_bearer(LEAKY_STAMP)))
+        assert response.status == UNAUTHORIZED
+        errors = [r for r in caplog.records if r.name == "pyweb.auth"]
+        assert errors
+        assert all(LEAKY_STAMP not in r.getMessage() for r in errors)
