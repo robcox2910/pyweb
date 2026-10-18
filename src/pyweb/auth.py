@@ -231,6 +231,7 @@ class SessionAuth:
         login_path: str = _DEFAULT_LOGIN_PATH,
         secure_cookies: bool = False,
         allowed_origins: Iterable[str] = (),
+        bearer_verifier: Callable[[str], User | None] | None = None,
     ) -> None:
         """Create the middleware.
 
@@ -243,8 +244,17 @@ class SessionAuth:
             allowed_origins: Other sites (exact ``"http(s)://host:port"``
                 strings) whose pages may open a WebSocket with the
                 visitor's cookie. The page's own site is always allowed.
+            bearer_verifier: Your own check for ``Authorization: Bearer``
+                tokens: given the token text, return the ``User`` it
+                names, or None. It is tried first; on None the signed
+                API token check runs. If it raises, the error is logged
+                (type only, never the token) and the visitor is anonymous.
+                It runs on the event loop, so keep it a cheap in-memory
+                lookup: no I/O, no slow hashing. An empty token is
+                anonymous without calling it.
 
         """
+        self._bearer_verifier = bearer_verifier
         self._signer = signer
         self._users = users
         self._cookie_name = cookie_name
@@ -306,7 +316,19 @@ class SessionAuth:
         """
         bearer = _bearer_token(request)
         if bearer is not None:
-            user, _ = self._user_from(bearer, _API_KIND)
+            if not bearer:
+                return None, None
+            try:
+                user = self._verify_bearer(bearer)
+            except Exception as exc:  # noqa: BLE001 - never trust a user callback
+                # Type only: the message may hold the token (e.g. KeyError(token)).
+                logger.error(  # noqa: TRY400
+                    "Bearer verifier raised %s; treating the visitor as anonymous",
+                    type(exc).__name__,
+                )
+                return None, None
+            if user is None:
+                user, _ = self._user_from(bearer, _API_KIND)
             if user is None:
                 logger.debug("Bearer token rejected")
             return user, None
@@ -318,6 +340,10 @@ class SessionAuth:
             logger.debug("Session cookie rejected")
             return None, None
         return user, claims
+
+    def _verify_bearer(self, token: str) -> User | None:
+        """Return the user the custom verifier names, or None if unset or unknown."""
+        return None if self._bearer_verifier is None else self._bearer_verifier(token)
 
     def _user_from(self, token: str, kind: str) -> tuple[User | None, dict[str, JsonValue]]:
         """Return the user a token of this kind names (or None) and its claims."""

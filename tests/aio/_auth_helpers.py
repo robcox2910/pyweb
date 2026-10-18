@@ -1,6 +1,6 @@
 """Shared auth test helpers: a demo site with users, a fake clock and log-in."""
 
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +11,7 @@ from pyweb.app import App
 from pyweb.auth import (
     InMemoryUsers,
     SessionAuth,
+    User,
     authenticate,
     current_user,
     require,
@@ -64,14 +65,25 @@ def go[T](coro: Coroutine[Any, Any, T]) -> T:
     return run(coro, clock=FakeClock(autojump=True))
 
 
-def build(*, login_path: str = "/login", secure_cookies: bool = False) -> Site:
+def build(
+    *,
+    login_path: str = "/login",
+    secure_cookies: bool = False,
+    bearer_verifier: Callable[[str], User | None] | None = None,
+) -> Site:
     """Build an app with a login form, protected routes and two users."""
     clock = Clock()
     users = InMemoryUsers()
     users.add("ada", ADA_WORD, roles=("admin",), rounds=ROUNDS)
     users.add("bob", BOB_WORD, rounds=ROUNDS)
     signer = SessionSigner(DEMO_KEY, clock=clock)
-    auth = SessionAuth(signer, users, login_path=login_path, secure_cookies=secure_cookies)
+    auth = SessionAuth(
+        signer,
+        users,
+        login_path=login_path,
+        secure_cookies=secure_cookies,
+        bearer_verifier=bearer_verifier,
+    )
     throttle = LoginThrottle(clock=clock)
     app = App()
     app.middleware(auth)
@@ -127,6 +139,12 @@ def build(*, login_path: str = "/login", secure_cookies: bool = False) -> Site:
     def admin(_request: HttpRequest) -> dict[str, JsonValue]:  # pyright: ignore[reportUnusedFunction]
         """Only for admins."""
         return {"admin": True}
+
+    @app.get("/viewer")
+    @require("viewer")
+    def viewer(_request: HttpRequest) -> dict[str, JsonValue]:  # pyright: ignore[reportUnusedFunction]
+        """Only for viewers."""
+        return {"viewer": True}
 
     @app.get("/token")
     @require()

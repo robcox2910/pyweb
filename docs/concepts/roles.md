@@ -118,12 +118,65 @@ handler with `authenticate(users, throttle, name, password)` and then
 - **Going back.** Before redirecting to a `?next=` value after login, pass
   it through `safe_next(...)`, which only allows paths on your own site.
 
+## Your Own Tokens
+
+Some visitors are not people at a gate but robots, such as a build
+server. Think of a **spare key** you cut for the robot: it is not a
+wristband, but the guard still checks it against the key list.
+
+Give `SessionAuth` a `bearer_verifier`: a small function that gets the
+token text and returns the `User` it belongs to, or `None` if it does not
+know the token. It is asked first; if it says `None`, PyWeb still tries
+its own signed API tokens. Bearer requests never need a CSRF token, and
+a bad one makes the visitor a stranger even with a good cookie. If your
+function breaks, PyWeb logs the error type (never the token or message) and treats the visitor
+as a stranger instead of showing a 500. The function runs on the event
+loop, so keep it a quick in-memory lookup: no files, no network, no slow
+password hashing.
+
+```python
+from pynet.loop import run
+
+from pyweb.app import App
+from pyweb.auth import InMemoryUsers, SessionAuth, User, require
+from pyweb.security import SessionSigner
+from pyweb.testing import TestClient
+
+SPARE_KEYS = {"robot-key-not-real": User("robot", "", frozenset({"viewer"}))}
+
+auth = SessionAuth(
+    SessionSigner("demo-key-not-real-0123456789abcdef"),
+    InMemoryUsers(),
+    bearer_verifier=SPARE_KEYS.get,
+)
+app = App()
+app.middleware(auth)
+
+
+@app.get("/reports")
+@require("viewer")
+def reports(request):
+    return {"ok": True}
+
+
+async def main():
+    client = TestClient(app)
+    good = await client.get("/reports", headers={"Authorization": "Bearer robot-key-not-real"})
+    bad = await client.get("/reports", headers={"Authorization": "Bearer guess"})
+    print(good.status, bad.status)
+
+
+run(main())
+```
+
 ## What We Test
 
 - Login sets an `HttpOnly`, `SameSite=Lax` cookie; logout clears it.
 - Strangers get `401` (JSON) or `303` to `/login?next=%2Fjobs` (HTML).
 - A user without the role gets `403`; one with it gets in.
 - A tampered, garbage, foreign or expired cookie is anonymous, never a 500.
+- A custom `bearer_verifier` is tried first, falls back to API tokens, and a
+  raising one is logged and anonymous.
 - Bearer tokens work; session and API tokens cannot stand in for each other.
 - Five bad logins lock the name with `429` until the lockout ends.
 - WebSocket upgrades: strangers `401`, wrong role `403`, crew `101`.
