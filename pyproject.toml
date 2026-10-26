@@ -20,13 +20,9 @@ classifiers = [
 ]
 keywords = ["http", "web-server", "education", "learning"]
 dependencies = [
-    "pynet",
-    "pycrypt",
+    "fromscratch-pynet>=0.2.0",
+    "fromscratch-pycrypt>=0.2.0",
 ]
-
-[tool.uv.sources]
-pynet = { git = "https://github.com/robcox2910/pynet", tag = "v0.1.1" }
-pycrypt = { git = "https://github.com/robcox2910/pycrypt", tag = "v0.1.1" }
 
 [project.urls]
 Homepage = "https://github.com/robcox2910/pyweb"

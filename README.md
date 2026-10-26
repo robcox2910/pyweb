@@ -123,7 +123,8 @@ More programs live in `examples/`: `async_hello.py`, `sse_clock.py`,
 
 ### Developing alongside a sibling
 
-PyWeb uses PyNet and PyCrypt from pinned git tags. To work on a sibling
+PyWeb uses PyNet and PyCrypt from PyPI (`fromscratch-pynet` and
+`fromscratch-pycrypt`). To work on a sibling
 checkout at the same time, install it editable and tell `uv` not to
 re-sync over it:
 
