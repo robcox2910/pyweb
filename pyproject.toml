@@ -1,5 +1,5 @@
 [project]
-name = "pyweb"
+name = "fromscratch-pyweb"
 dynamic = ["version"]
 description = "An educational HTTP web server built from scratch in Python"
 readme = "README.md"
