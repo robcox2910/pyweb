@@ -62,6 +62,14 @@ Content-Type: text/html
 | **Template** | A form letter with blanks | HTML with `{{ name }}` placeholders |
 | **Server** | The post office | Listens for connections |
 
+## Install
+
+```bash
+pip install fromscratch-pyweb
+```
+
+Or get the whole series at once with `pip install fromscratch-pystack`. To read the code or run the tests, clone it from [GitHub](https://github.com/robcox2910/pyweb).
+
 ## Let's Start!
 
 Head to [Requests](concepts/requests.md) to learn how HTTP requests work.
