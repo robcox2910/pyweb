@@ -232,6 +232,43 @@ wheels = [
 ]
 
 [[package]]
+name = "fromscratch-pyweb"
+source = { editable = "." }
+dependencies = [
+    { name = "pycrypt" },
+    { name = "pynet" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "commitizen" },
+    { name = "hypothesis" },
+    { name = "pip-audit" },
+    { name = "pre-commit" },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-timeout" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "commitizen", marker = "extra == 'dev'", specifier = ">=4.4.0" },
+    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.170" },
+    { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.10.0" },
+    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.1" },
+    { name = "pycrypt", git = "https://github.com/robcox2910/pycrypt?tag=v0.1.1" },
+    { name = "pynet", git = "https://github.com/robcox2910/pynet?tag=v0.1.1" },
+    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.400" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.4" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
+    { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.3.1" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.3" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "hypothesis"
 version = "6.170.1"
 source = { registry = "https://pypi.org/simple" }
@@ -683,43 +720,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/fc/54/fad125f5c48f78216
 wheels = [
     { url = "https://files.pythonhosted.org/packages/de/ec/643826e4d69b7bdce4213f221e8f5ed06d0a9dd69fa9b33342578d2cc8c8/python_discovery-1.6.3-py3-none-any.whl", hash = "sha256:cb7654125e3dcb594269a6feb56ac693f1f13b7c654493a93eba72dc22d18034", size = 39386, upload-time = "2026-10-16T03:54:28.237Z" },
 ]
-
-[[package]]
-name = "pyweb"
-source = { editable = "." }
-dependencies = [
-    { name = "pycrypt" },
-    { name = "pynet" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "commitizen" },
-    { name = "hypothesis" },
-    { name = "pip-audit" },
-    { name = "pre-commit" },
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-timeout" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "commitizen", marker = "extra == 'dev'", specifier = ">=4.4.0" },
-    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.170" },
-    { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.10.0" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.1" },
-    { name = "pycrypt", git = "https://github.com/robcox2910/pycrypt?tag=v0.1.1" },
-    { name = "pynet", git = "https://github.com/robcox2910/pynet?tag=v0.1.1" },
-    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.400" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.4" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
-    { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.3.1" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.3" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "pyyaml"
